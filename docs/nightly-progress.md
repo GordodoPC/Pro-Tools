@@ -42,3 +42,12 @@
 - Builds Debug/Release aprovados; CTest 10/10 em ambos, 410 verificações mais smoke.
 - UI com notas reais em Realtek passou; MIDI físico e terceiros permanecem pendentes.
 - Próxima etapa autorizada: gravação de áudio multipista, punch e takes (Fase 5).
+
+## 2026-10-14 — conclusão funcional da Fase 5
+
+- 0.5.0: WAV multipista mono/stereo, inputs/arm/monitor opt-in, punch/roll,
+  loop/takes, worker de disco/filas limitadas e recovery.json, sessão v5.
+- Debug/Release builds e CTest 11/11; 448 verificações + dois smoke tests.
+- UI nas duas configurações passou com captura simulada e sessão de duas faixas.
+- Hardware multicanal/latência de entrada/ASIO/disco cheio real continuam pendentes.
+- Próximo ciclo autorizado: Fase 6, edição de áudio, fades e render offline.

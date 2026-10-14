@@ -2,6 +2,7 @@
 #include "Audio/AudioEngine.h"
 #include "EditorComponents.h"
 #include "MidiComponents.h"
+#include "RecordingComponents.h"
 #include "Session/Preferences.h"
 #include "Session/Session.h"
 #include <functional>
@@ -21,6 +22,7 @@ public:
     bool openSession(const juce::File&);
     void requestClose();
     void enableUiValidation(const juce::File& outputDirectory);
+    void enableRecordingUiValidation(const juce::File& outputDirectory);
     void enableMidiUiValidation(const juce::File& outputDirectory);
 private:
     AudioRuntime audio;
@@ -48,6 +50,12 @@ private:
     juce::LookAndFeel_V4 look;
     std::unique_ptr<juce::FileChooser> chooser;
     std::unique_ptr<juce::DocumentWindow> midiWindow;
+    std::unique_ptr<juce::DocumentWindow> recordingWindow;
+    void addAudioTrack();
+    void openRecordingEditor();
+    void closeRecording();
+    void recordingUiValidation();
+    bool validationRecording=false;
     void addMidiTrack();
     void openMidiEditor();
     void closeMidiEditing();

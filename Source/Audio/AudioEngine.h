@@ -6,6 +6,7 @@
 #include <vector>
 #include <thread>
 #include "MixProcessor.h"
+#include "AudioRecorder.h"
 #include "Midi/MidiData.h"
 #include "Midi/MidiQueue.h"
 
@@ -13,6 +14,7 @@ namespace nova {
 struct MidiIO;
 class MidiPort;
 class MidiRecorder;
+class AudioRecorder;
 struct Peak { float low = 0, high = 0; };
 struct Clip {
     juce::File source;
@@ -30,12 +32,21 @@ struct Track {
     std::unique_ptr<MixProcessor> instrument;
     juce::String midiInput;
     std::atomic<bool> midiArm{false};
+    std::atomic<bool> recordArm{false},monitorInput{false};
+    std::atomic<float> recordGain{1},inputPeak{0};
+    int recordInputLeft=0,recordInputRight=1;
+    bool recordStereo=false;
+    bool monitorPreference=false;
+    struct Take {uint64_t id=0,group=0;juce::File file;double start=0,length=0,rate=48000;int channels=1;};
+    std::vector<Take> takes;
+    uint64_t activeTake=0;
     bool monoBus = false;
     std::shared_ptr<Clip> clip;
     struct Region {
         uint64_t id = 0;
         std::shared_ptr<Clip> asset;
         double start = 0, offset = 0, length = 0;
+        uint64_t takeId=0;
         double end() const { return start + length; }
     };
     std::vector<Region> regions;
@@ -94,6 +105,14 @@ public:
     uint64_t midiCaptureDrops() const noexcept;
     std::atomic<bool> midiRecording{false};
     std::atomic<int64_t> midiRecordEndTick{0};
+    std::atomic<bool> monitoringAllowed{true}; // device start revokes; explicit UI opt-in restores
+    RecordingOptions recordingOptions; // control thread; capture uses an immutable prepared copy
+    std::atomic<bool> audioRecording{false};
+    std::atomic<double> recordingExtent{0};
+    void attachRecorder(AudioRecorder*);
+    bool addAudioTrack(const juce::String&,juce::String&);
+    bool activateTake(int track,uint64_t take,juce::String&);
+    void renderWithInput(const float* const* input,int inputs,float* const* output,int channels,int frames) noexcept;
     bool setRoute(int source, int destination, juce::String&);
     bool setSend(int source, int slot, int destination, bool preFader, juce::String&);
     bool rebuildGraph(juce::String&);
@@ -112,6 +131,7 @@ public:
     const Track& track(int index) const { return tracks.at(static_cast<size_t>(index)); }
     double duration() const;
     uint64_t newRegionId() { return nextRegionId++; }
+    void reserveRegionIds(uint64_t used){nextRegionId=std::max(nextRegionId,used+1);}
     void setLoop(double start, double end, bool enabled);
     std::atomic<bool> loopEnabled{false};
     std::atomic<double> loopStart{0}, loopEnd{0};
@@ -181,6 +201,10 @@ private:
     void renderBlock(float* const*, int channels, int offset, int frames) noexcept;
     void scheduleTrackMidi(int track,int frames,int callbackOffset,bool active) noexcept;
     void consumeMidiInput(int frames) noexcept;
+    void renderInternal(float* const*,int,int,double,const float* const*,int) noexcept;
+    AudioRecorder* recorder=nullptr;
+    const float* const* renderInputs=nullptr;
+    int renderInputCount=0;
     juce::Optional<juce::AudioPlayHead::PositionInfo> getPosition() const override;
 };
 
@@ -190,6 +214,7 @@ public:
     juce::AudioDeviceManager devices;
     juce::String initialError;
     std::unique_ptr<MidiRecorder> midiRecorder;
+    std::unique_ptr<AudioRecorder> audioRecorder;
     AudioRuntime();
     ~AudioRuntime();
     void serviceMaintenance(); // message thread: rate/latency changes; never from callback

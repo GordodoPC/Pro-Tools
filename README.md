@@ -1,4 +1,4 @@
-# NOVA DAW — Fase 4 (0.4.0)
+# NOVA DAW — Fase 5 (0.5.0)
 
 Aplicativo desktop próprio para Windows em C++20/JUCE. Esta versão implementa
 Edit/Mix, importação WAV mono/estéreo, waveform real, reprodução simultânea,
@@ -8,9 +8,11 @@ grade musical, painéis redimensionáveis, preferências e saída Master stereo/
 A versão 0.3.0 adiciona buses stereo/mono, sends pré/pós-fader, quatro inserts
 por canal/Master, VST3 stereo, cinco efeitos nativos e automação Read.
 A Fase 4 adiciona faixas/clips MIDI, Piano Roll, instrumentos VST3, entrada e
-gravação MIDI, metrônomo e arquivos Standard MIDI File. Gravação de áudio,
+gravação MIDI, metrônomo e arquivos Standard MIDI File. A Fase 5 adiciona gravação
+WAV multipista, entradas mono/estéreo, punch/roll, loop/takes e recuperação.
 ASIO, bounce de áudio e Write/Touch/Latch continuam pendentes.
 A Fase 3.5 adiciona PDC e proteção do ciclo de vida/processamento VST3.
+Gravação: [docs/phase5-report.md](docs/phase5-report.md).
 Resultados MIDI: [docs/phase4-report.md](docs/phase4-report.md).
 Estabilização: [docs/phase3-stability-report.md](docs/phase3-stability-report.md);
 histórico: [docs/phase3-report.md](docs/phase3-report.md).
@@ -216,3 +218,15 @@ variável. Entrada física ainda precisa de validação no dispositivo do usuár
 A validação **--validate-midi-ui "pasta"** exercita gestos/controles, áudio real
 da fixture no callback de saída e save/reopen MIDI. Ela não testa dispositivo
 MIDI físico nem instrumento de terceiros.
+
+## Gravação de áudio (Fase 5)
+
+Em **Audio**, ative as entradas e escolha device/rate/buffer. Use **Gravacao →
+Nova faixa de audio**, configure canais em **Entradas, Record, Punch e Takes**,
+arme as faixas e pressione Record. Stop fecha os WAVs e cria regiões/takes.
+Punch/roll e loop usam segundos da timeline. Ativar take preserva arquivos anteriores.
+Input Monitoring vem desligado; habilite explicitamente com fones e evite feedback.
+**Recuperar captura** aceita pastas `capture-*` com `recovery.json` e WAVs válidos.
+Capturas ficam em `Recordings/Audio` ao lado da sessão (ou na raiz antes de salvar).
+As pastas de captura são fontes da sessão; mantenha-as junto ao projeto.
+Validação automatizada usa entradas simuladas; hardware de gravação não certificado.

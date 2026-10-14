@@ -16,7 +16,7 @@ TrackControls::TrackControls(AudioEngine& e,EditModel& ed,int i,bool v,ApplyEdit
     name.onTextChange=[this]{const auto text=name.getText();apply([this,text]{editor.rename(index,text);return true;});};
     gainLabel.setText("VOL dB",juce::dontSendNotification);panLabel.setText("PAN",juce::dontSendNotification);
     input.setText(engine.track(index).midiTrack?"IN: MIDI":engine.track(index).auxiliary?"IN: bus":"IN: regioes WAV",juce::dontSendNotification);input.setFont(11.0f);
-    record.setEnabled(engine.track(index).midiTrack);record.setClickingTogglesState(true);record.setTooltip(engine.track(index).midiTrack?"Armar gravacao MIDI":"Gravacao de audio ainda pendente.");record.onClick=[this,changed]{engine.track(index).midiArm=record.getToggleState();changed();};
+    record.setEnabled(!engine.track(index).auxiliary);record.setClickingTogglesState(true);record.setTooltip(engine.track(index).midiTrack?"Armar gravacao MIDI":"Armar gravacao de audio (entradas no menu Gravacao).");record.onClick=[this,changed]{if(engine.track(index).midiTrack)engine.track(index).midiArm=record.getToggleState();else engine.track(index).recordArm=record.getToggleState();changed();};
     gain.setRange(-60,6,0.1);gain.setDoubleClickReturnValue(true,0);
     gain.setSliderStyle(v?juce::Slider::LinearVertical:juce::Slider::LinearHorizontal);
     gain.setTextBoxStyle(v?juce::Slider::TextBoxBelow:juce::Slider::TextBoxRight,false,56,18);
@@ -49,7 +49,7 @@ void TrackControls::refresh(){
     gain.setValue(juce::Decibels::gainToDecibels(t.gain.load(),-60.0f),juce::dontSendNotification);
     pan.setValue(t.pan.load(),juce::dontSendNotification);
     mute.setToggleState(t.mute.load(),juce::dontSendNotification);solo.setToggleState(t.solo.load(),juce::dontSendNotification);
-    output.setSelectedId(t.outputTarget<0?t.outputMode.load()+1:t.outputTarget+4,juce::dontSendNotification);record.setToggleState(t.midiArm,juce::dontSendNotification);repaint();
+    output.setSelectedId(t.outputTarget<0?t.outputMode.load()+1:t.outputTarget+4,juce::dontSendNotification);record.setToggleState(t.midiTrack?t.midiArm.load():t.recordArm.load(),juce::dontSendNotification);repaint();
 }
 bool TrackControls::validateBindings(){refresh();
     auto& t=engine.track(index);const auto oldGain=t.gain.load(),oldPan=t.pan.load();const auto oldRoute=t.outputMode.load();const bool oldMute=t.mute.load(),oldSolo=t.solo.load();

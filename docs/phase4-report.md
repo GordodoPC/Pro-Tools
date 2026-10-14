@@ -107,3 +107,6 @@ Debug: `build/ninja-debug/NovaDAW_artefacts/Debug/NOVA DAW.exe`.
 
 A evidência de hardware executada é saída Realtek com instrumento próprio;
 entrada MIDI física não foi testada, e nenhum módulo de terceiros foi instalado.
+
+Continuidade: gravação de áudio/sessão v5 implementada e validada na Fase 5;
+ver [phase5-report.md](phase5-report.md) para limites e evidências.
