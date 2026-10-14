@@ -1,8 +1,11 @@
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <cstdlib>
 // Original deterministic VST3 fixture. Built locally; never installed globally.
 class TestGain final : public juce::AudioProcessor {
 public:
     TestGain():AudioProcessor(BusesProperties().withInput("In",juce::AudioChannelSet::stereo(),true).withOutput("Out",juce::AudioChannelSet::stereo(),true)){
+        // Fault injection only in this original test fixture; no audio is simulated.
+        if(juce::SystemStats::getEnvironmentVariable("NOVA_TEST_SCAN_FAILURE",{}).isNotEmpty())std::_Exit(86);
         addParameter(gain=new juce::AudioParameterFloat(juce::ParameterID("gain",1),"Gain",0.0f,1.0f,0.5f));}
     const juce::String getName()const override{return "NOVA Test Gain";}
     void prepareToPlay(double,int)override{}

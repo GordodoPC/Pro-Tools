@@ -9,6 +9,22 @@ struct ToolWindow final : juce::DocumentWindow {
     }
     void closeButtonPressed()override{setVisible(false);}
 };
+class PluginManagerPanel final : public juce::Component,private juce::Timer {
+public:
+    explicit PluginManagerPanel(PluginCatalog& c):catalog(c){for(auto* child:std::initializer_list<juce::Component*>{&list,&details,&remove,&clear})addAndMakeVisible(child);
+        details.setMultiLine(true);details.setReadOnly(true);list.onChange=[this]{updateDetails();};
+        remove.onClick=[this]{const int i=list.getSelectedId()-1;if(i>=0&&i<types.size()){catalog.remove(types[i]);refreshList();}};
+        clear.onClick=[this]{catalog.clearBlacklist();updateDetails();};refreshList();setSize(600,390);startTimer(500);
+    }
+    ~PluginManagerPanel()override{stopTimer();}
+    void resized()override{list.setBounds(15,15,getWidth()-30,30);details.setBounds(15,55,getWidth()-30,getHeight()-115);remove.setBounds(15,getHeight()-45,200,30);clear.setBounds(225,getHeight()-45,220,30);}
+private:
+    PluginCatalog& catalog;juce::Array<juce::PluginDescription> types;juce::ComboBox list;juce::TextEditor details;juce::TextButton remove{"Remover da lista"},clear{"Limpar registro de falhas"};
+    void refreshList(){types=catalog.known.getTypes();const int selected=list.getSelectedId();list.clear();for(int i=0;i<types.size();++i)list.addItem(types[i].name,i+1);if(!types.isEmpty())list.setSelectedId(std::clamp(selected,1,types.size()),juce::dontSendNotification);updateDetails();}
+    void updateDetails(){juce::String text=catalog.status()+"\n";const int i=list.getSelectedId()-1;if(i>=0&&i<types.size()){const auto& p=types[i];text+=p.name+"\n"+p.manufacturerName+" "+p.version+"\n"+p.fileOrIdentifier+"\n";}
+        text+="\nModulos com falha:\n"+catalog.known.getBlacklistedFiles().joinIntoString("\n");details.setText(text);remove.setEnabled(i>=0&&!catalog.scanning());clear.setEnabled(!catalog.scanning());}
+    void timerCallback()override{if(types.size()!=catalog.known.getNumTypes())refreshList();else updateDetails();}
+};
 class EffectPanel final : public juce::Component,private juce::Timer {
 public:
     EffectPanel(MixProcessor& p,std::function<void()> c,double rate):processor(p),changed(std::move(c)),sampleRate(rate){
@@ -30,6 +46,7 @@ public:
             g.drawText("20 Hz                         1 kHz                         20 kHz",r.toNearestInt().removeFromBottom(16),juce::Justification::centred);
         }else if(processor.kind==EffectKind::compressor)g.drawText("Reducao: "+juce::String(processor.reduction.load(),1)+" dB",15,getHeight()-45,getWidth()-30,25,juce::Justification::centredLeft);
     }
+    bool validateBindings(){const float old=processor.parameter(0);sliders[0]->setValue(old+1,juce::sendNotificationSync);const bool ok=processor.parameter(0)==old+1;sliders[0]->setValue(old,juce::sendNotificationSync);bypass.setToggleState(true,juce::dontSendNotification);bypass.onClick();const bool bypassOk=processor.bypass;bypass.setToggleState(false,juce::dontSendNotification);bypass.onClick();return ok&&bypassOk;}
 private:
     MixProcessor& processor;std::function<void()> changed;double sampleRate;
     juce::TextButton bypass{"Bypass"};std::vector<std::unique_ptr<juce::Slider>> sliders;std::vector<std::unique_ptr<juce::Label>> labels;
@@ -49,6 +66,8 @@ public:
         level.onValueChange=[this]{engine.track(index).sends[sendSlot].gain=level.getValue()<=-60?0:juce::Decibels::decibelsToGain(float(level.getValue()));changed();};setSize(400,180);
     }
     void resized()override{destination.setBounds(15,15,getWidth()-30,30);pre.setBounds(15,55,160,28);label.setBounds(15,95,getWidth()-30,22);level.setBounds(15,120,getWidth()-30,30);}
+    bool validateBindings(int auxiliary){destination.setSelectedId(auxiliary+2,juce::sendNotificationSync);pre.setToggleState(true,juce::dontSendNotification);pre.onClick();level.setValue(-6,juce::sendNotificationSync);
+        const auto& send=engine.track(index).sends[sendSlot];return send.target==auxiliary&&send.preFader&&std::abs(send.gain.load()-juce::Decibels::decibelsToGain(-6.0f))<1e-5f;}
 private:AudioEngine& engine;int index,sendSlot;MixEdit apply;std::function<void()> changed;juce::ComboBox destination;juce::TextButton pre{"Pre-fader"};juce::Slider level;juce::Label label;
 };
 class AutomationPanel final : public juce::Component {
@@ -75,13 +94,16 @@ public:
                 lane.points.push_back({time,float(value)});previous=time;
             }
             const auto selectedMode=static_cast<AutomationMode>(mode.getSelectedId()-1);
-            apply([this,lane=std::move(lane),selectedMode]()mutable{auto& t=engine.track(index);auto found=std::find_if(t.automation.begin(),t.automation.end(),[&](const auto& item){return item.target==lane.target && item.parameter==lane.parameter;});
+            const bool applied=apply([this,lane=std::move(lane),selectedMode]()mutable{auto& t=engine.track(index);auto found=std::find_if(t.automation.begin(),t.automation.end(),[&](const auto& item){return item.target==lane.target && item.parameter==lane.parameter;});
+                if(found==t.automation.end()&&t.automation.size()>=64&&!lane.points.empty()){result.setText("Limite de 64 lanes por canal.",juce::dontSendNotification);return false;}
                 if(found!=t.automation.end())t.automation.erase(found);if(!lane.points.empty())t.automation.push_back(std::move(lane));t.automationMode=selectedMode;return true;});
-            result.setText("Automacao aplicada.",juce::dontSendNotification);
+            if(applied)result.setText("Automacao aplicada.",juce::dontSendNotification);
         };setSize(620,460);
     }
     void resized()override{target.setBounds(15,15,getWidth()-30,28);parameter.setBounds(15,50,getWidth()-150,28);mode.setBounds(getWidth()-125,50,110,28);
         instructions.setBounds(15,85,getWidth()-30,65);points.setBounds(15,155,getWidth()-30,getHeight()-220);commit.setBounds(15,getHeight()-55,150,30);result.setBounds(175,getHeight()-55,getWidth()-190,30);}
+    bool validateBindings(){target.setSelectedId(1,juce::sendNotificationSync);parameter.setSelectedId(1,juce::dontSendNotification);mode.setSelectedId(2,juce::dontSendNotification);points.setText("0 : 0.5\n1 : 1");commit.onClick();
+        const auto& t=engine.track(index);return t.automationMode==AutomationMode::read&&std::any_of(t.automation.begin(),t.automation.end(),[](const auto& lane){return lane.target==-1&&lane.points.size()==2&&lane.points[0].value==0.5f;});}
 private:AudioEngine& engine;int index;MixEdit apply;juce::ComboBox target,parameter,mode;juce::TextEditor points;juce::Label instructions,result;juce::TextButton commit{"Aplicar lane"};
     void loadPoints(){const int selected=target.getSelectedId();const int dest=selected==1?-1:selected==2?-2:selected-3;const int param=parameter.getSelectedId()-1;juce::String text;
         for(const auto& lane:engine.track(index).automation)if(lane.target==dest&&lane.parameter==param)for(const auto& p:lane.points)text+=juce::String(p.time,6)+" : "+juce::String(p.value,6)+"\n";points.setText(text);}
@@ -89,6 +111,7 @@ private:AudioEngine& engine;int index;MixEdit apply;juce::ComboBox target,parame
 void meter(juce::Graphics& g,juce::Rectangle<float> r,float value){g.setColour(juce::Colour(0xff080d14));g.fillRect(r);
     const float amount=std::clamp((juce::Decibels::gainToDecibels(value,-60.0f)+60)/60,0.0f,1.0f);g.setColour(value>1?juce::Colours::salmon:accent);g.fillRect(r.removeFromBottom(r.getHeight()*amount));}
 }
+std::unique_ptr<juce::DocumentWindow> createPluginManager(PluginCatalog& catalog){return std::make_unique<ToolWindow>(new PluginManagerPanel(catalog),"Plugins VST3");}
 ChannelStrip::ChannelStrip(AudioEngine& e,EditModel& ed,int i,PluginCatalog& cat,MixEdit a,std::function<void()> c):engine(e),edit(ed),index(i),catalog(cat),apply(std::move(a)),changed(std::move(c)){
     for(auto* child:std::initializer_list<juce::Component*>{&name,&input,&peakLabel,&gain,&pan,&inputGain,&mute,&solo,&clip,&colour,&automation,&output})addAndMakeVisible(child);
     for(int slot=0;slot<4;++slot){addAndMakeVisible(inserts[slot]);inserts[slot].onClick=[this,slot]{insertMenu(slot);};}
@@ -165,6 +188,15 @@ void ChannelStrip::paint(juce::Graphics& g){g.fillAll(panel);g.setColour(index<0
     const float peak=index<0?engine.masterPeak.load():engine.track(index).peak.load(),rms=index<0?engine.masterRms.load():engine.track(index).rms.load();
     meter(g,{getWidth()-42.0f,432,9,std::max(90.0f,getHeight()-470.0f)},peak);meter(g,{getWidth()-28.0f,432,9,std::max(90.0f,getHeight()-470.0f)},rms);
     g.setColour(juce::Colour(0xff8797ab));g.setFont(10);g.drawText("P  RMS",getWidth()-48,getHeight()-33,45,18,juce::Justification::centred);
+}
+bool ChannelStrip::validatePhase3Bindings(int auxiliary){
+    if(index<0)return false;
+    apply([this]{chain()[0]=std::make_unique<MixProcessor>(EffectKind::equalizer);return true;});
+    auto* effect=new EffectPanel(*chain()[0],changed,engine.sampleRate());toolWindow=std::make_unique<ToolWindow>(effect,"EQ validation");const bool effectOk=effect->validateBindings();closeEditors();
+    auto* send=new SendPanel(engine,index,0,apply,changed);toolWindow=std::make_unique<ToolWindow>(send,"Send validation");const bool sendOk=send->validateBindings(auxiliary);closeEditors();
+    auto* automationPanel=new AutomationPanel(engine,index,apply);toolWindow=std::make_unique<ToolWindow>(automationPanel,"Automation validation");const bool automationOk=automationPanel->validateBindings();closeEditors();
+    // Native editor, send and automation share the actual components used by their buttons.
+    return effectOk&&sendOk&&automationOk;
 }
 bool ChannelStrip::validateBindings(){if(index<0)return false;refresh();auto& t=engine.track(index);const float oldGain=t.gain,oldPan=t.pan,oldInput=t.inputGain;const bool oldMute=t.mute,oldSolo=t.solo;const int oldMode=t.outputMode,oldTarget=t.outputTarget;
     gain.setValue(-6,juce::sendNotificationSync);pan.setValue(1,juce::sendNotificationSync);inputGain.setValue(6,juce::sendNotificationSync);mute.setToggleState(true,juce::sendNotificationSync);solo.setToggleState(true,juce::sendNotificationSync);output.setSelectedId(3,juce::sendNotificationSync);

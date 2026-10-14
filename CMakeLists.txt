@@ -35,6 +35,9 @@ target_link_libraries(NovaPluginScanner PRIVATE NovaCore)
 add_dependencies(NovaDAW NovaPluginScanner)
 add_custom_command(TARGET NovaDAW POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "$<TARGET_FILE:NovaPluginScanner>" "$<TARGET_FILE_DIR:NovaDAW>/NovaPluginScanner.exe")
+add_custom_target(NovaScannerRuntime ALL COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "$<TARGET_FILE:NovaPluginScanner>" "$<TARGET_FILE_DIR:NovaDAW>/NovaPluginScanner.exe"
+    DEPENDS NovaPluginScanner NovaDAW)
 
 if(BUILD_TESTING)
     juce_add_plugin(NovaTestGain COMPANY_NAME "Projeto SOM" PLUGIN_MANUFACTURER_CODE NvDw
@@ -61,6 +64,11 @@ if(BUILD_TESTING)
     target_sources(NovaPhase3Tests PRIVATE tests/Phase3Tests.cpp)
     target_link_libraries(NovaPhase3Tests PRIVATE NovaCore)
     add_dependencies(NovaPhase3Tests NovaTestGain_VST3 NovaPluginScanner)
+    add_custom_command(TARGET NovaPhase3Tests POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:NovaPluginScanner>" "$<TARGET_FILE_DIR:NovaPhase3Tests>/NovaPluginScanner.exe")
+    add_custom_target(NovaScannerTestRuntime ALL COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:NovaPluginScanner>" "$<TARGET_FILE_DIR:NovaPhase3Tests>/NovaPluginScanner.exe"
+        DEPENDS NovaPluginScanner NovaPhase3Tests)
     add_test(NAME DSPVST3AutomationSessions COMMAND NovaPhase3Tests
         "${CMAKE_BINARY_DIR}/test-data" "$<TARGET_FILE:NovaTestGain_VST3>" "$<TARGET_FILE:NovaPluginScanner>")
 endif()

@@ -1,14 +1,21 @@
 #include "Audio/AudioEngine.h"
+#include "Audio/PluginCatalog.h"
 #include "Session/Session.h"
 #include <iostream>
 #include <cmath>
 #include <stdexcept>
 #include <cstdlib>
 #include <new>
+#if defined(_MSC_VER) && defined(_DEBUG)
+#include <crtdbg.h>
+#endif
 
 namespace {
 thread_local bool measuring=false;
 thread_local int allocations=0;
+#if defined(_MSC_VER) && defined(_DEBUG)
+int allocationHook(int type,void*,size_t,int,long,const unsigned char*,int){if(measuring && type==_HOOK_ALLOC)++allocations;return 1;}
+#endif
 }
 // Count application-side allocations while rendering the native signal path.
 void* operator new(std::size_t size){if(measuring)++allocations;if(auto* p=std::malloc(size?size:1))return p;throw std::bad_alloc();}
@@ -35,6 +42,7 @@ int main(int argc,char** argv){juce::ScopedJuceInitialiser_GUI gui;try{
     nova::MixProcessor delay(nova::EffectKind::delay);delay.setParameter(0,10);delay.setParameter(1,0.5f);delay.setParameter(2,1);delay.prepare(48000);
     signal=constant(1500,0);signal.setSample(0,0,1);process(delay,signal);
     expect(near(signal.getSample(0,0),0) && near(signal.getSample(0,480),1) && near(signal.getSample(0,960),0.5f),"delay impulse time and feedback are exact");
+    delay.reset(false);signal=constant(1500,0);process(delay,signal);expect(signal.getMagnitude(0,1500)==0,"seek invalidates previous delay cells without stale echoes");
     delay.bypass=true;signal=constant(2048,0.25f);process(delay,signal);expect(near(signal.getSample(0,2047),0.25f),"native bypass returns dry signal after smoothing");
     nova::MixProcessor reverb(nova::EffectKind::reverb);reverb.setParameter(2,1);reverb.prepare(48000);signal=constant(48000,0);signal.setSample(0,0,0.5f);process(reverb,signal);
     expect(signal.getMagnitude(0,1000,47000)>0.01f && std::isfinite(signal.getRMSLevel(0,0,48000)),"JUCE reverb produces a real finite impulse tail");
@@ -84,9 +92,29 @@ int main(int argc,char** argv){juce::ScopedJuceInitialiser_GUI gui;try{
     const auto v2=dir.getChildFile("phase2-compatible.novadaw");v2.replaceWithText(juce::JSON::toString(data));
     expect(nova::Session::load(v2,loaded,error) && !loaded.track(0).inserts[0] && loaded.track(0).outputTarget==-1,"version 2 migrates with default phase3 state");
     loaded.track(0).inserts[0]=std::make_unique<nova::MixProcessor>(nova::EffectKind::equalizer);loaded.track(0).inserts[1]=std::make_unique<nova::MixProcessor>(nova::EffectKind::delay);loaded.prepareProcessors();loaded.play();
-    output=constant(4096,0);allocations=0;measuring=true;loaded.render(output.getArrayOfWritePointers(),2,4096);measuring=false;
-    expect(allocations==0,"native mixer inserts and arbitrary buffers allocate no heap memory while rendering");
+    output=constant(4096,0);allocations=0;
+#if defined(_MSC_VER) && defined(_DEBUG)
+    const auto oldHook=_CrtSetAllocHook(allocationHook);
+#endif
+    measuring=true;loaded.render(output.getArrayOfWritePointers(),2,4096);measuring=false;
+#if defined(_MSC_VER) && defined(_DEBUG)
+    _CrtSetAllocHook(oldHook);
+#endif
+    expect(allocations==0,"native callback has no observed allocations (C++ new, plus Debug CRT hook)");
     loaded.track(0).automationMode=nova::AutomationMode::read;loaded.track(0).automation={{0,12,{{0,0},{0.1,6}}}};loaded.seek(0.05);output=render(loaded);
     expect(loaded.track(0).inserts[0]->parameter(12)>3 && loaded.track(0).inserts[0]->parameter(12)<3.4f,"native parameter automation interpolates in plugin units");
+    // Run the same Timer-driven catalog used by the application through failure and recovery.
+    {
+        nova::PluginCatalog catalog(dir.getChildFile("catalog-test.xml"));catalog.known.clear();
+        const juce::File module(juce::String::fromUTF8(argv[2]));const auto bundle=module.getParentDirectory().getParentDirectory().getParentDirectory();
+        const juce::FileSearchPath search(bundle.getParentDirectory().getFullPathName());
+        bool failureIsolated=false,recovered=false;int stage=0;
+        struct Deadline final:juce::Timer { void timerCallback()override{juce::MessageManager::getInstance()->stopDispatchLoop();} } deadline;
+        catalog.onChanged=[&]{if(catalog.scanning())return;if(stage++==0){failureIsolated=catalog.known.getNumTypes()==0&&!catalog.known.getBlacklistedFiles().isEmpty();
+                _putenv_s("NOVA_TEST_SCAN_FAILURE","");catalog.scan(search);
+            }else{recovered=catalog.known.getNumTypes()==1&&catalog.known.getBlacklistedFiles().isEmpty();juce::MessageManager::getInstance()->stopDispatchLoop();}};
+        _putenv_s("NOVA_TEST_SCAN_FAILURE","1");catalog.scan(search);deadline.startTimer(45000);juce::MessageManager::getInstance()->runDispatchLoop();deadline.stopTimer();_putenv_s("NOVA_TEST_SCAN_FAILURE","");
+        expect(failureIsolated,"scanner child failure leaves host alive and records blacklist");expect(recovered,"scanner retry recovers failed module and persists plugin list");
+    }
     std::cout<<checks<<" Phase 3 checks passed\n";return 0;
 }catch(const std::exception& ex){measuring=false;std::cerr<<"FAIL: "<<ex.what()<<'\n';return 1;}}

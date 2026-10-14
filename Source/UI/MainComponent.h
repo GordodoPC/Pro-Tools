@@ -68,6 +68,7 @@ private:
     bool validationSawAudio = false, validationSawPlay = false, validationSawPause = false;
     bool validationImported = false, validationResume = false;
     bool validationControls = false;
+    bool validationPhase3 = false;
     bool validationEditing=false,validationLoop=false;
     double validationPausePosition = 0;
 };

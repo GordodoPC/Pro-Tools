@@ -3,6 +3,7 @@
 #include "Session/EditModel.h"
 namespace nova {
 using MixEdit = std::function<bool(std::function<bool()>)>;
+std::unique_ptr<juce::DocumentWindow> createPluginManager(PluginCatalog&);
 class ChannelStrip final : public juce::Component {
 public:
     ChannelStrip(AudioEngine&,EditModel&,int,PluginCatalog&,MixEdit,std::function<void()>);
@@ -12,6 +13,7 @@ public:
     void refresh();
     void closeEditors();
     bool validateBindings();
+    bool validatePhase3Bindings(int auxiliary);
 private:
     AudioEngine& engine;EditModel& edit;int index;PluginCatalog& catalog;MixEdit apply;std::function<void()> changed;
     juce::Label name,input,peakLabel;

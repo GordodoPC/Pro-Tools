@@ -16,6 +16,7 @@ public:
     ~MixProcessor();
     EffectKind kind;
     std::atomic<bool> bypass{false};
+    std::atomic<bool> faulted{false};
     std::atomic<float> reduction{0};
     std::array<std::atomic<float>, 24> parameters{};
     std::unique_ptr<juce::AudioPluginInstance> plugin;
@@ -42,6 +43,8 @@ private:
     std::array<std::array<float, 6>, 7> coefficients{};
     std::array<std::array<std::array<float, 2>, 7>, 2> filterState{};
     juce::AudioBuffer<float> delayBuffer;
+    std::vector<uint32_t> delayGeneration;
+    uint32_t currentDelayGeneration = 1;
     int delayWrite = 0, holdSamples = 0;
     float envelope = 0, gateGain = 0;
     juce::Reverb reverberator;

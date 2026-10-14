@@ -349,7 +349,7 @@ void MainComponent::timerCallback() {
     if (validationStep < 0 || ++callbackTicks % 15 != 0) return;
     if (validationStep == 0) {
         juce::Array<juce::File> sources;
-        for (int i = 0; i < audio.engine.trackCount(); ++i) sources.add(audio.engine.track(i).clip->source);
+        for (int i = 0; i < audio.engine.trackCount(); ++i) if(!audio.engine.track(i).auxiliary) sources.add(audio.engine.track(i).clip->source);
         mixer.closeEditors(); audio.editStructure([this] { audio.engine.clear(); });
         importFiles(sources);
         validationImported = audio.engine.trackCount() >= 2;
@@ -357,7 +357,10 @@ void MainComponent::timerCallback() {
         validationControls=editBindings&&mixBindings;
         validationDirectory.createDirectory();validationDirectory.getChildFile("bindings.txt").replaceWithText("Edit="+juce::String(int(editBindings))+" Mix="+juce::String(int(mixBindings)));
         validationDirectory.createDirectory();
-        validationEditing = validateEditor(); dirty = false;
+        validationEditing = validateEditor();
+        juce::String auxiliaryError;audio.editStructure([&]{audio.engine.addAux("Validation FX",false,auxiliaryError);});editor.reset();refreshTracks();
+        validationPhase3=mixer.validatePhase3Bindings();dirty=false;
+        juce::String saveError;audio.editStructure([&]{Session::save(validationDirectory.getChildFile("phase3-ui.novadaw"),audio.engine,saveError);});
         auto image = createComponentSnapshot(getLocalBounds());
         if (auto stream = validationDirectory.getChildFile("edit.png").createOutputStream()) {
             stream->setPosition(0); stream->truncate(); juce::PNGImageFormat().writeImageToStream(image,*stream);
@@ -383,10 +386,10 @@ void MainComponent::timerCallback() {
         validationLoop = audio.engine.isPlaying() && audio.engine.position()>=0.1 && audio.engine.position()<0.2 && audio.engine.masterPeak.load()>0;
         stopButton.onClick();
     } else if (validationStep == 5) {
-        const bool ok = validationEditing && validationLoop && validationControls && validationImported && validationResume && validationSawPlay && validationSawAudio && validationSawPause
+        const bool ok = validationPhase3 && validationEditing && validationLoop && validationControls && validationImported && validationResume && validationSawPlay && validationSawAudio && validationSawPause
             && !audio.engine.isPlaying() && audio.engine.position() == 0 && audio.engine.trackCount() >= 2;
         auto root = std::make_unique<juce::DynamicObject>();
-        root->setProperty("passed",ok); root->setProperty("play",validationSawPlay); root->setProperty("hardwareCallbackNonzero",validationSawAudio);
+        root->setProperty("phase3NativeEditorSendAutomationMaster",validationPhase3);root->setProperty("passed",ok); root->setProperty("play",validationSawPlay); root->setProperty("hardwareCallbackNonzero",validationSawAudio);
         root->setProperty("wavImport",validationImported); root->setProperty("resume",validationResume);
         root->setProperty("editMixControlBindings",validationControls);
         root->setProperty("editingGesturesShortcutsLayoutSession",validationEditing); root->setProperty("hardwareLoop",validationLoop);

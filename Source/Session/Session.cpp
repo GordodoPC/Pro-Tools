@@ -83,6 +83,7 @@ bool Session::save(const juce::File& file, const AudioEngine& engine, juce::Stri
     return true;
 }
 bool Session::load(const juce::File& file, AudioEngine& engine, juce::String& error) {
+    if(file.getSize()>64LL*1024*1024){error="Sessao excede o limite de 64 MiB de metadados.";return false;}
     juce::var data;
     if (juce::JSON::parse(file.loadFileAsString(), data).failed() || !data.isObject()
         || data["format"].toString() != "nova-daw-session" || !data["version"].isInt() || (int(data["version"])<1 || int(data["version"])>3)
@@ -153,7 +154,7 @@ bool Session::load(const juce::File& file, AudioEngine& engine, juce::String& er
     if(v2 && static_cast<bool>(data["loopEnabled"]) && (le<=ls || le>end+1e-8)){error="Loop fora da sessao.";return false;}
     auto candidate=std::make_unique<AudioEngine>();candidate->setOutputRate(engine.sampleRate());
     for (auto& entry : entries) {
-        candidate->addSharedClip(entry.clip, error);
+        if(!candidate->addSharedClip(entry.clip, error))return false;
         auto& t = candidate->track(candidate->trackCount() - 1);
         t.gain = entry.gain; t.pan = entry.pan; t.mute = entry.mute; t.solo = entry.solo;
         t.name=entry.name;t.colour=entry.colour;t.height=entry.height;t.outputMode=entry.route;

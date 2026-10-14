@@ -104,8 +104,8 @@ AudioEngine::AudioEngine() {
 }
 void AudioEngine::setSmoothingTime(double seconds) {
     smoothingTime=std::clamp(seconds,0.0,0.1);smoothingInitialized=false;
-    for(int i=0;i<maxTracks;++i){smoothGain[i].reset(outputRate,smoothingTime);smoothPan[i].reset(outputRate,smoothingTime);smoothInput[i].reset(outputRate,smoothingTime);}
-    smoothMaster.reset(outputRate,smoothingTime);
+    for(int i=0;i<maxTracks;++i){smoothGain[i].reset(outputRate,smoothingTime);smoothPan[i].reset(outputRate,smoothingTime);smoothInput[i].reset(outputRate,smoothingTime);smoothAudible[i].reset(outputRate,smoothingTime);for(auto& send:smoothSend[i])send.reset(outputRate,smoothingTime);}
+    smoothMaster.reset(outputRate,smoothingTime);smoothMasterAudible.reset(outputRate,smoothingTime);
 }
 void AudioEngine::setOutputRate(double rate) {
     outputRate=std::isfinite(rate)&&rate>=100?rate:44100;setSmoothingTime(smoothingTime);prepareProcessors();
@@ -166,9 +166,13 @@ void AudioEngine::render(float* const* output,int channels,int frames) noexcept 
     if(generation!=consumedSeek){renderPosition=requestedPosition.load(std::memory_order_relaxed);consumedSeek=generation;
         // Seeking resets native tails. VST3 reset is a lifecycle operation and stays off the callback.
         for(int i=0;i<count;++i)for(auto& p:track(i).inserts)if(p)p->reset(false);for(auto& p:masterInserts)if(p)p->reset(false);}
-    masterPeak=0;masterRms=0;for(int i=0;i<count;++i){track(i).peak=0;track(i).rms=0;}
-    if(!playing)return;
-    for(int offset=0;offset<frames;offset+=mixBlockSize)renderBlock(output,channels,offset,std::min(mixBlockSize,frames-offset));
+    if(!playing){masterPeak=masterRms=0;for(int i=0;i<count;++i)track(i).peak=track(i).rms=0;return;}
+    float masterEnergy=0,masterMaximum=0;std::array<float,maxTracks> channelEnergy{},channelMaximum{};
+    for(int offset=0;offset<frames;offset+=mixBlockSize){const int size=std::min(mixBlockSize,frames-offset);renderBlock(output,channels,offset,size);
+        masterEnergy+=blockMasterRms*blockMasterRms*size;masterMaximum=std::max(masterMaximum,blockMasterPeak);
+        for(int i=0;i<count;++i){channelEnergy[i]+=blockRms[i]*blockRms[i]*size;channelMaximum[i]=std::max(channelMaximum[i],blockPeaks[i]);}}
+    // Publish meters after the full callback; UI readers never see an intermediate clear.
+    masterPeak=masterMaximum;masterRms=std::sqrt(masterEnergy/frames);for(int i=0;i<count;++i){track(i).peak=channelMaximum[i];track(i).rms=std::sqrt(channelEnergy[i]/frames);}
     visiblePosition=renderPosition;
 }
 void AudioEngine::renderBlock(float* const* output,int channels,int offset,int frames) noexcept {
@@ -189,13 +193,14 @@ void AudioEngine::renderBlock(float* const* output,int channels,int offset,int f
     std::array<float,maxTracks> peaks{},squares{};
     for(int n=0;n<count;++n){const int i=processingOrder[n];auto& t=track(i);auto& buffer=channelBuffers[i];
         const float input=std::clamp(t.inputGain.load(),0.0f,16.0f);
-        if(!smoothingInitialized){smoothGain[i].setCurrentAndTargetValue(t.gain.load());smoothPan[i].setCurrentAndTargetValue(t.pan.load());smoothInput[i].setCurrentAndTargetValue(input);}
-        smoothInput[i].setTargetValue(input);
-        for(int s=0;s<frames;++s){const double time=timeAt(s);float gain=t.gain.load(),pan=t.pan.load();
-            if(t.automationMode==AutomationMode::read)for(const auto& lane:t.automation){if(lane.target==-1)gain=lane.evaluate(time,gain);else if(lane.target==-2)pan=lane.evaluate(time,pan);}
+        if(!smoothingInitialized){smoothGain[i].setCurrentAndTargetValue(t.gain.load());smoothPan[i].setCurrentAndTargetValue(t.pan.load());smoothInput[i].setCurrentAndTargetValue(input);smoothAudible[i].setCurrentAndTargetValue(audible[i]?1.0f:0.0f);for(int j=0;j<2;++j)smoothSend[i][j].setCurrentAndTargetValue(t.sends[j].gain.load());}
+        smoothInput[i].setTargetValue(input);smoothAudible[i].setTargetValue(audible[i]?1.0f:0.0f);
+        std::array<float,mixBlockSize> audibility{};for(int s=0;s<frames;++s)audibility[s]=smoothAudible[i].getNextValue();
+        for(int s=0;s<frames;++s){const double time=timeAt(s);float pan=t.pan.load();
+            if(t.automationMode==AutomationMode::read)for(const auto& lane:t.automation){if(lane.target==-2)pan=lane.evaluate(time,pan);}
             smoothPan[i].setTargetValue(std::clamp(pan,-1.0f,1.0f));
             const float p=smoothPan[i].getNextValue();const float in=smoothInput[i].getNextValue();
-            if(!t.auxiliary && audible[i])for(const auto& region:t.regions){
+            if(!t.auxiliary)for(const auto& region:t.regions){
                 if(!region.asset || time<region.start || time>=region.end())continue;const auto& clip=*region.asset;
                 const double pos=(time-region.start+region.offset)*clip.sampleRate;
                 if(pos<0 || pos>=clip.samples.getNumSamples())continue;
@@ -207,7 +212,7 @@ void AudioEngine::renderBlock(float* const* output,int channels,int offset,int f
             }
             if(t.auxiliary){if(t.monoBus){const float m=(buffer.getSample(0,s)+buffer.getSample(1,s))*0.5f;buffer.setSample(0,s,m);buffer.setSample(1,s,m);}
                 buffer.setSample(0,s,buffer.getSample(0,s)*(p>0?1-p:1));buffer.setSample(1,s,buffer.getSample(1,s)*(p<0?1+p:1));}
-            for(int c=0;c<2;++c)buffer.setSample(c,s,audible[i]?buffer.getSample(c,s)*in:0);
+            for(int c=0;c<2;++c)buffer.setSample(c,s,buffer.getSample(c,s)*in);
         }
         // Parameter Read uses 16-sample segments; volume/pan interpolate each sample.
         const bool parameterAutomation=t.automationMode==AutomationMode::read && std::any_of(t.automation.begin(),t.automation.end(),[](const auto& lane){return lane.target>=0;});
@@ -215,25 +220,27 @@ void AudioEngine::renderBlock(float* const* output,int channels,int offset,int f
             for(int s=0;s<frames;s+=16){for(const auto& lane:t.automation)if(lane.target>=0 && lane.target<4 && t.inserts[lane.target])t.inserts[lane.target]->setParameter(lane.parameter,lane.evaluate(timeAt(s),t.inserts[lane.target]->parameter(lane.parameter)));
                 float* ptr[]{buffer.getWritePointer(0)+s,buffer.getWritePointer(1)+s};juce::AudioBuffer<float> segment(ptr,2,std::min(16,frames-s));for(auto& insert:t.inserts)if(insert)insert->process(segment,segment.getNumSamples());}
         }else for(auto& insert:t.inserts)if(insert)insert->process(buffer,frames);
-        for(const auto& send:t.sends)if(send.target>=0 && send.preFader && audible[i])for(int c=0;c<2;++c)channelBuffers[send.target].addFrom(c,0,buffer,c,0,frames,std::clamp(send.gain.load(),0.0f,2.0f));
+        for(int j=0;j<2;++j){const auto& send=t.sends[j];smoothSend[i][j].setTargetValue(std::clamp(send.gain.load(),0.0f,2.0f));
+            if(send.target>=0 && send.preFader)for(int s=0;s<frames;++s){const float g=smoothSend[i][j].getNextValue()*audibility[s];for(int c=0;c<2;++c)channelBuffers[send.target].addSample(c,s,buffer.getSample(c,s)*g);}}
         // Smooth fader after inserts/pre sends. Targets are re-evaluated at the sample's transport position.
         for(int s=0;s<frames;++s){float g=t.gain.load();if(t.automationMode==AutomationMode::read)for(const auto& lane:t.automation)if(lane.target==-1)g=lane.evaluate(timeAt(s),g);
             smoothGain[i].setTargetValue(std::clamp(g,0.0f,2.0f));const float f=smoothGain[i].getNextValue();
-            for(int c=0;c<2;++c){const float v=audible[i]?buffer.getSample(c,s)*f:0;buffer.setSample(c,s,v);peaks[i]=std::max(peaks[i],std::abs(v));squares[i]+=v*v;}}
-        for(const auto& send:t.sends)if(send.target>=0 && !send.preFader && audible[i])for(int c=0;c<2;++c)channelBuffers[send.target].addFrom(c,0,buffer,c,0,frames,std::clamp(send.gain.load(),0.0f,2.0f));
+            for(int c=0;c<2;++c){const float v=buffer.getSample(c,s)*f*audibility[s];buffer.setSample(c,s,v);peaks[i]=std::max(peaks[i],std::abs(v));squares[i]+=v*v;}}
+        for(int j=0;j<2;++j){const auto& send=t.sends[j];if(send.target>=0 && !send.preFader)for(int s=0;s<frames;++s){const float g=smoothSend[i][j].getNextValue();for(int c=0;c<2;++c)channelBuffers[send.target].addSample(c,s,buffer.getSample(c,s)*g);}}
         auto& destination=t.outputTarget<0?masterBuffer:channelBuffers[t.outputTarget];const int mode=t.outputMode.load();
         for(int s=0;s<frames;++s){const float l=buffer.getSample(0,s),r=buffer.getSample(1,s);destination.addSample(0,s,mode==2?0:mode==1?(l+r)*0.5f:l);destination.addSample(1,s,mode==1?0:mode==2?(l+r)*0.5f:r);}
-        t.peak=std::max(t.peak.load(),peaks[i]);t.rms=std::sqrt(squares[i]/(frames*2));if(peaks[i]>1)t.clipped=true;
+        blockPeaks[i]=peaks[i];blockRms[i]=std::sqrt(squares[i]/(frames*2));if(peaks[i]>1)t.clipped=true;
     }
     for(auto& insert:masterInserts)if(insert)insert->process(masterBuffer,frames);
-    if(!smoothingInitialized)smoothMaster.setCurrentAndTargetValue(masterGain.load());smoothingInitialized=true;smoothMaster.setTargetValue(std::clamp(masterGain.load(),0.0f,2.0f));
+    if(!smoothingInitialized){smoothMaster.setCurrentAndTargetValue(masterGain.load());smoothMasterAudible.setCurrentAndTargetValue(masterMute?0.0f:1.0f);}smoothingInitialized=true;smoothMaster.setTargetValue(std::clamp(masterGain.load(),0.0f,2.0f));
+    smoothMasterAudible.setTargetValue(masterMute?0.0f:1.0f);
     float peak=0,square=0;
-    for(int s=0;s<frames;++s){const float gain=masterMute?0:smoothMaster.getNextValue();float values[2]{};
+    for(int s=0;s<frames;++s){const float gain=smoothMaster.getNextValue()*smoothMasterAudible.getNextValue();float values[2]{};
         for(int c=0;c<2;++c){float v=masterBuffer.getSample(c,s)*gain;if(!std::isfinite(v))v=0;peak=std::max(peak,std::abs(v));square+=v*v;values[c]=v;}
         if(channels==1){if(output[0])output[0][offset+s]=std::clamp((values[0]+values[1])*0.5f,-1.0f,1.0f);}
         else for(int c=0;c<2;++c)if(output[c])output[c][offset+s]=std::clamp(values[c],-1.0f,1.0f);
     }
-    masterPeak=std::max(masterPeak.load(),peak);masterRms=std::sqrt(square/(2*frames));if(peak>1)masterClipped=true;
+    blockMasterPeak=peak;blockMasterRms=std::sqrt(square/(2*frames));if(peak>1)masterClipped=true;
     renderPosition=timeAt(frames);if(!looping && renderPosition>=end){renderPosition=end;playing=false;}
 }
 void AudioEngine::audioDeviceIOCallbackWithContext(const float* const*, int,

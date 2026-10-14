@@ -9,6 +9,8 @@ public:
     ~PluginCatalog() override;
     juce::KnownPluginList known;
     void scan(const juce::FileSearchPath&);
+    void remove(const juce::PluginDescription&);
+    void clearBlacklist();
     juce::String status() const { return scanStatus; }
     bool scanning() const { return active; }
     std::function<void()> onChanged;
@@ -21,5 +23,6 @@ private:
     int failures = 0;
     juce::String scanStatus = "Scanner VST3 pronto";
     void timerCallback() override;
+    void saveCache();
 };
 }

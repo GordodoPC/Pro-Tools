@@ -51,19 +51,24 @@ void MixProcessor::setParameter(int i,float v){
 juce::String MixProcessor::name()const {
     switch(kind){case EffectKind::equalizer:return "NOVA EQ";case EffectKind::compressor:return "NOVA Compressor";
     case EffectKind::gate:return "NOVA Gate";case EffectKind::delay:return "NOVA Delay";case EffectKind::reverb:return "NOVA Reverb";
-    case EffectKind::vst3:return description.name+(plugin ? "":" [ausente]");}return {};
+    case EffectKind::vst3:return description.name+(faulted?" [falha]":plugin ? "":" [ausente]");}return {};
 }
 void MixProcessor::prepare(double rate){
     sampleRate=rate;
     for(int i=0;i<std::min(parameterCount(),24);++i){smoothed[i].reset(rate,0.02);smoothed[i].setCurrentAndTargetValue(parameter(i));}
     wet.reset(rate,0.005);wet.setCurrentAndTargetValue(bypass ? 0.0f:1.0f);
-    if(kind==EffectKind::delay){delayBuffer.setSize(2,static_cast<int>(rate*2)+mixBlockSize+2);delayBuffer.clear();}
+    if(kind==EffectKind::delay){delayBuffer.setSize(2,static_cast<int>(rate*2)+mixBlockSize+2);delayBuffer.clear();delayGeneration.assign(static_cast<size_t>(delayBuffer.getNumSamples()),0);currentDelayGeneration=1;}
     reverberator.setSampleRate(rate);
-    if(plugin){plugin->setRateAndBufferSizeDetails(rate,mixBlockSize);plugin->prepareToPlay(rate,mixBlockSize);}
+    if(plugin){plugin->releaseResources();plugin->setRateAndBufferSizeDetails(rate,mixBlockSize);plugin->prepareToPlay(rate,mixBlockSize);}
     reset();
 }
-void MixProcessor::reset(bool resetPlugin){filterState={};envelope=gateGain=0;holdSamples=delayWrite=0;if(delayBuffer.getNumSamples())delayBuffer.clear();reverberator.reset();if(plugin && resetPlugin)plugin->reset();}
-void MixProcessor::updateEq(const std::array<float,24>& p,double rate){
+void MixProcessor::reset(bool resetPlugin){filterState={};envelope=gateGain=0;holdSamples=delayWrite=0;
+    // Invalidate delay cells in O(1) on seek; do not clear seconds of memory in the callback.
+    if(++currentDelayGeneration==0){std::fill(delayGeneration.begin(),delayGeneration.end(),0);currentDelayGeneration=1;}
+    reverberator.reset();if(plugin && resetPlugin)plugin->reset();}
+namespace {
+std::array<std::array<float,6>,7> eqCoefficients(const std::array<float,24>& p,double rate){
+    std::array<std::array<float,6>,7> coefficients{};
     using C=juce::dsp::IIR::ArrayCoefficients<float>;
     auto f=[rate](float value){return std::clamp(value,1.0f,static_cast<float>(rate*0.45));};
     coefficients[0]=p[17]>=0.5f ? C::makeHighPass(rate,f(p[0]),0.707f):std::array<float,6>{1,0,0,1,0,0};
@@ -71,17 +76,20 @@ void MixProcessor::updateEq(const std::array<float,24>& p,double rate){
     coefficients[2]=C::makeLowShelf(rate,f(p[2]),p[4],juce::Decibels::decibelsToGain(p[3]));
     coefficients[3]=C::makeHighShelf(rate,f(p[5]),p[7],juce::Decibels::decibelsToGain(p[6]));
     for(int band=0;band<3;++band){const int i=8+band*3;coefficients[4+band]=C::makePeakFilter(rate,f(p[i]),p[i+2],juce::Decibels::decibelsToGain(p[i+1]));}
+    return coefficients;
 }
+}
+void MixProcessor::updateEq(const std::array<float,24>& p,double rate){coefficients=eqCoefficients(p,rate);}
 void MixProcessor::process(juce::AudioBuffer<float>& buffer,int frames)noexcept {
-    if(frames<1 || frames>mixBlockSize)return;
+    if(frames<1 || frames>mixBlockSize || buffer.getNumChannels()<2 || buffer.getNumSamples()<frames)return;
     auto* l=buffer.getWritePointer(0);auto* r=buffer.getWritePointer(1);
     for(int c=0;c<2;++c)std::copy_n(buffer.getReadPointer(c),frames,dry[c].data());
     wet.setTargetValue(bypass.load() ? 0.0f:1.0f);
     if(kind==EffectKind::vst3){
-        if(plugin && !plugin->isSuspended()){
+        if(plugin && !faulted.load() && !plugin->isSuspended()){
             // A view into preallocated stereo memory; two channels fit JUCE's inline pointer array.
             float* pointers[]{l,r};juce::AudioBuffer<float> view(pointers,2,frames);midi.clear();
-            try{plugin->processBlock(view,midi);}catch(...){bypass=true;wet.setCurrentAndTargetValue(0);}
+            try{plugin->processBlock(view,midi);}catch(...){bypass=true;faulted=true;wet.setCurrentAndTargetValue(0);}
         }
     }else {
         for(int i=0;i<parameterCount();++i)smoothed[i].setTargetValue(parameters[i].load(std::memory_order_relaxed));
@@ -114,9 +122,9 @@ void MixProcessor::process(juce::AudioBuffer<float>& buffer,int frames)noexcept 
                 const int size=delayBuffer.getNumSamples();const float delaySamples=static_cast<float>(sampleRate*p[0]*0.001);
                 float read=static_cast<float>(delayWrite)-delaySamples;while(read<0)read+=size;
                 const int a=static_cast<int>(read)%size,b=(a+1)%size;const float fraction=read-std::floor(read);
-                for(int c=0;c<2;++c){auto* ring=delayBuffer.getWritePointer(c);const float delayed=ring[a]+fraction*(ring[b]-ring[a]);
+                for(int c=0;c<2;++c){auto* ring=delayBuffer.getWritePointer(c);const float first=delayGeneration[a]==currentDelayGeneration?ring[a]:0,second=delayGeneration[b]==currentDelayGeneration?ring[b]:0;const float delayed=first+fraction*(second-first);
                     const float x=buffer.getSample(c,s);ring[delayWrite]=x+delayed*p[1];buffer.setSample(c,s,x*(1-p[2])+delayed*p[2]);}
-                delayWrite=(delayWrite+1)%size;
+                delayGeneration[delayWrite]=currentDelayGeneration;delayWrite=(delayWrite+1)%size;
             }else if(kind==EffectKind::reverb){
                 juce::Reverb::Parameters rp;rp.roomSize=p[0];rp.damping=p[1];rp.wetLevel=p[2];rp.dryLevel=1-p[2];
                 reverberator.setParameters(rp);reverberator.processStereo(l+s,r+s,1);
@@ -131,10 +139,10 @@ double MixProcessor::magnitude(double frequency,double rate)const {
     if(kind!=EffectKind::equalizer || bypass)return 1;
     std::array<float,24> p{};for(int i=0;i<19;++i)p[i]=parameter(i);
     // Reuse JUCE's coefficient formulas without mutating the audio-owned filters.
-    MixProcessor calculator(EffectKind::equalizer);calculator.updateEq(p,rate);double result=1;
+    const auto response=eqCoefficients(p,rate);double result=1;
     const double angle=2*juce::MathConstants<double>::pi*frequency/rate;
     const std::complex<double> z=std::polar(1.0,-angle);
-    for(const auto& a:calculator.coefficients)result*=std::abs((double(a[0])+double(a[1])*z+double(a[2])*z*z)/(double(a[3])+double(a[4])*z+double(a[5])*z*z));
+    for(const auto& a:response)result*=std::abs((double(a[0])+double(a[1])*z+double(a[2])*z*z)/(double(a[3])+double(a[4])*z+double(a[5])*z*z));
     return result;
 }
 juce::var MixProcessor::state()const {

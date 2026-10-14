@@ -32,5 +32,16 @@ int main(){juce::ScopedJuceInitialiser_GUI juceInit;try{
     e.track(0).inputGain=1;e.masterMute=true;out=render(e);expect(out.getMagnitude(0,256)==0,"Master mute");
     nova::AudioEngine smooth;smooth.setOutputRate(48000);source(smooth);smooth.play();render(smooth);smooth.track(0).gain=0;out=render(smooth);
     expect(out.getSample(0,0)>0.09f && out.getSample(0,239)<0.001f,"fader ramp avoids immediate discontinuity");
+    smooth.track(0).gain=1;render(smooth);smooth.track(0).mute=true;out=render(smooth);
+    expect(out.getSample(0,0)>0.09f && out.getSample(0,239)<0.001f,"mute applies a smooth ramp");
+    smooth.track(0).mute=false;render(smooth);smooth.masterMute=true;out=render(smooth);
+    expect(out.getSample(0,0)>0.09f && out.getSample(0,239)<0.001f,"Master mute applies a smooth ramp");
+    nova::AudioEngine sendSmooth;sendSmooth.setOutputRate(48000);source(sendSmooth);
+    expect(sendSmooth.addAux("Smooth return",false,error) && sendSmooth.setSend(0,0,1,true,error),"prepare smooth send fixture");
+    sendSmooth.track(0).gain=0;sendSmooth.track(0).sends[0].gain=1;sendSmooth.play();render(sendSmooth);sendSmooth.track(0).sends[0].gain=0;out=render(sendSmooth);
+    expect(out.getSample(0,0)>0.09f && out.getSample(0,239)<0.001f,"send level applies a smooth ramp");
+    nova::AudioEngine rms;rms.setOutputRate(48000);rms.setSmoothingTime(0);source(rms);auto& samples=rms.track(0).clip->samples;
+    for(int c=0;c<2;++c)for(int s=256;s<512;++s)samples.setSample(c,s,0.3f);rms.play();out=render(rms,512);
+    expect(near(rms.masterRms,std::sqrt(0.05f)) && near(rms.track(0).rms,std::sqrt(0.05f)),"RMS integrates the complete hardware buffer across internal chunks");
     std::cout<<checks<<" mixer checks passed\n";return 0;
 }catch(const std::exception& ex){std::cerr<<"FAIL: "<<ex.what()<<'\n';return 1;}}

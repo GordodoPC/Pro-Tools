@@ -2,14 +2,17 @@
   "version": 6,
   "configurePresets": [
     {"name":"windows-ninja-debug","generator":"Ninja","binaryDir":"${sourceDir}/build/ninja-debug","cacheVariables":{"CMAKE_BUILD_TYPE":"Debug","BUILD_TESTING":"ON"}},
+    {"name":"windows-ninja-release","generator":"Ninja","binaryDir":"${sourceDir}/build/ninja-release","cacheVariables":{"CMAKE_BUILD_TYPE":"Release","BUILD_TESTING":"ON"}},
     {"name":"windows-msvc","generator":"Visual Studio 18 2026","architecture":"x64","binaryDir":"${sourceDir}/build/msvc","cacheVariables":{"BUILD_TESTING":"ON"}}
   ],
   "buildPresets": [
     {"name":"windows-ninja-debug","configurePreset":"windows-ninja-debug","jobs":4},
+    {"name":"windows-ninja-release","configurePreset":"windows-ninja-release","jobs":4},
     {"name":"windows-msvc-debug","configurePreset":"windows-msvc","configuration":"Debug","jobs":4}
   ],
   "testPresets": [
     {"name":"windows-ninja-debug","configurePreset":"windows-ninja-debug","output":{"outputOnFailure":true}},
+    {"name":"windows-ninja-release","configurePreset":"windows-ninja-release","output":{"outputOnFailure":true}},
     {"name":"windows-msvc-debug","configurePreset":"windows-msvc","configuration":"Debug","output":{"outputOnFailure":true}}
   ]
 }

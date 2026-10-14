@@ -166,19 +166,24 @@ void Ruler::paint(juce::Graphics& g){
 }
 void Ruler::mouseDown(const juce::MouseEvent& e){engine.seek(editor.quantize((e.x+scrollX)/timeline.pixelsPerSecond));}
 Mixer::Mixer(AudioEngine& e,EditModel& ed,ApplyEdit a):engine(e),editor(ed),apply(a),catalog(juce::File(NOVA_PROJECT_ROOT).getChildFile(".nova-plugin-list.xml")){
-    for(auto* c:std::initializer_list<juce::Component*>{&addAux,&addMono,&scan,&scanFolder,&scanStatus})addAndMakeVisible(c);
+    for(auto* c:std::initializer_list<juce::Component*>{&addAux,&addMono,&scan,&scanFolder,&plugins,&scanStatus})addAndMakeVisible(c);
     addAux.onClick=[this]{if(onAddAux)onAddAux(false);};addMono.onClick=[this]{if(onAddAux)onAddAux(true);};
     scan.onClick=[this]{juce::VST3PluginFormat format;catalog.scan(format.getDefaultLocationsToSearch());};
-    scanFolder.onClick=[this]{if(onScanFolder)onScanFolder();};
+    scanFolder.onClick=[this]{if(onScanFolder)onScanFolder();};plugins.onClick=[this]{pluginManager=createPluginManager(catalog);};
 }
 void Mixer::rebuild(std::function<void()> changed){controls.clear();for(int i=0;i<=engine.trackCount();++i){auto c=std::make_unique<ChannelStrip>(engine,editor,i==engine.trackCount()?-1:i,catalog,apply,changed);addAndMakeVisible(*c);controls.push_back(std::move(c));}layoutChannels(getHeight());}
-void Mixer::layoutChannels(int height){const int h=std::max(650,height);setSize(std::max(1000,(engine.trackCount()+1)*184+20),h);
-    addAux.setBounds(8,6,115,28);addMono.setBounds(129,6,115,28);scan.setBounds(250,6,115,28);scanFolder.setBounds(371,6,115,28);scanStatus.setBounds(495,6,490,28);
+void Mixer::layoutChannels(int height){const int h=std::max(590,height);setSize(std::max(1000,(engine.trackCount()+1)*184+20),h);
+    addAux.setBounds(8,6,115,28);addMono.setBounds(129,6,115,28);scan.setBounds(250,6,115,28);scanFolder.setBounds(371,6,115,28);plugins.setBounds(492,6,85,28);scanStatus.setBounds(585,6,395,28);
     for(int i=0;i<int(controls.size());++i)controls[i]->setBounds(8+i*184,42,176,h-50);
 }
 void Mixer::refresh(){for(auto& c:controls)c->refresh();scanStatus.setText(catalog.status(),juce::dontSendNotification);scan.setEnabled(!catalog.scanning());scanFolder.setEnabled(!catalog.scanning());repaint();}
-void Mixer::closeEditors(){for(auto& c:controls)c->closeEditors();engine.closeEditors();}
+void Mixer::closeEditors(){pluginManager.reset();for(auto& c:controls)c->closeEditors();engine.closeEditors();}
 void Mixer::paint(juce::Graphics& g){g.fillAll(bg);}
+bool Mixer::validatePhase3Bindings(){if(engine.trackCount()<2 || controls.empty())return false;const int auxiliary=engine.trackCount()-1;
+    const bool trackOk=controls.front()->validatePhase3Bindings(auxiliary);const int before=engine.masterInserts[0]?1:0;
+    apply([this]{engine.masterInserts[0]=std::make_unique<MixProcessor>(EffectKind::compressor);return true;});
+    return trackOk&&engine.masterInserts[0]&&before==0;
+}
 bool Mixer::validateBindings(){return !controls.empty()&&controls.front()->validateBindings();}
 ClipPanel::ClipPanel(AudioEngine& e,EditModel& ed):engine(e),editor(ed),list("Clips",this){addAndMakeVisible(list);list.setColour(juce::ListBox::backgroundColourId,bg);list.setRowHeight(46);}
 void ClipPanel::refresh(){rows.clear();for(int i=0;i<engine.trackCount();++i)for(const auto& r:engine.track(i).regions)rows.emplace_back(i,r.id);list.updateContent();list.repaint();}

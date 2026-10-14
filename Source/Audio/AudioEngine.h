@@ -104,9 +104,14 @@ private:
     juce::AudioBuffer<float> masterBuffer;
     std::array<int, maxTracks> processingOrder{};
     std::array<juce::SmoothedValue<float>, maxTracks> smoothGain, smoothPan, smoothInput;
+    std::array<juce::SmoothedValue<float>, maxTracks> smoothAudible;
+    std::array<std::array<juce::SmoothedValue<float>, 2>, maxTracks> smoothSend;
     juce::SmoothedValue<float> smoothMaster;
+    juce::SmoothedValue<float> smoothMasterAudible;
     double smoothingTime = 0.005;
     bool smoothingInitialized = false;
+    std::array<float, maxTracks> blockPeaks{}, blockRms{};
+    float blockMasterPeak = 0, blockMasterRms = 0;
     void renderBlock(float* const*, int channels, int offset, int frames) noexcept;
 };
 

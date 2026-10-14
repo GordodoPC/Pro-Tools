@@ -73,6 +73,7 @@ public:
     void paint(juce::Graphics&) override;
     bool validateBindings();
     void closeEditors();
+    bool validatePhase3Bindings();
     void scanPlugins(const juce::FileSearchPath& paths){catalog.scan(paths);}
     std::function<void(bool)> onAddAux;
     std::function<void()> onScanFolder;
@@ -80,8 +81,9 @@ private:
     AudioEngine& engine;EditModel& editor;ApplyEdit apply;
     PluginCatalog catalog;
     std::vector<std::unique_ptr<ChannelStrip>> controls;
-    juce::TextButton addAux{"+ Aux stereo"},addMono{"+ Bus mono"},scan{"Scan VST3"},scanFolder{"Pasta VST3"};
+    juce::TextButton addAux{"+ Aux stereo"},addMono{"+ Bus mono"},scan{"Scan VST3"},scanFolder{"Pasta VST3"},plugins{"Plugins"};
     juce::Label scanStatus;
+    std::unique_ptr<juce::DocumentWindow> pluginManager;
 };
 class ClipPanel final : public juce::Component,private juce::ListBoxModel {
 public:
