@@ -24,6 +24,7 @@ struct Clip {
     std::vector<Peak> waveform;
     double duration() const { return samples.getNumSamples() / sampleRate; }
 };
+enum class FadeCurve { linear, exponential, equalPower };
 struct Track {
     bool auxiliary = false;
     bool midiTrack = false;
@@ -47,6 +48,11 @@ struct Track {
         std::shared_ptr<Clip> asset;
         double start = 0, offset = 0, length = 0;
         uint64_t takeId=0;
+        double fadeIn=0,fadeOut=0;
+        FadeCurve fadeInCurve=FadeCurve::linear,fadeOutCurve=FadeCurve::linear;
+        std::shared_ptr<Clip> original;
+        double originalOffset=0,originalLength=0;
+        double stretch=1,semitones=0,cents=0;
         double end() const { return start + length; }
     };
     std::vector<Region> regions;
@@ -89,6 +95,7 @@ public:
     bool addClip(std::unique_ptr<Clip>, juce::String& error);
     bool addSharedClip(std::shared_ptr<Clip>, juce::String& error);
     void recalculateMediaBytes();
+    int64_t mediaBytes()const{return bytes;}
     void clear();
     bool addAux(const juce::String&, bool mono, juce::String&);
     bool addMidiTrack(const juce::String&,juce::String&);
@@ -126,6 +133,7 @@ public:
     juce::String processingError() const { return configurationError; } // control thread only
     uint64_t contentionDropouts() const;
     void setSmoothingTime(double seconds);
+    double smoothingSeconds()const{return smoothingTime;}
     int trackCount() const { return count; }
     Track& track(int index) { return tracks.at(static_cast<size_t>(index)); }
     const Track& track(int index) const { return tracks.at(static_cast<size_t>(index)); }
@@ -139,7 +147,10 @@ public:
     int beatsPerBar = 4, beatUnit = 4;
     std::atomic<bool> metronomeEnabled{false};
     std::atomic<uint64_t> midiDroppedBlocks{0};
-    void play() { playing.store(true); }
+    void startPreview(std::shared_ptr<Clip>);
+    void stopPreview();
+    bool previewActive()const{return previewPlaying.load();}
+    void play() { previewPlaying=false;playing.store(true); }
     void pause();
     void stop() { pause(); seek(0); }
     void seek(double seconds); // control thread: plugin reset is quiesced, never called by render
@@ -160,6 +171,10 @@ public:
 private:
     std::array<Track, maxTracks> tracks;
     int count = 0;
+    std::shared_ptr<Clip> previewClip;
+    std::atomic<bool> previewPlaying{false};
+    double previewCursor=0;
+    void renderPreview(float* const*,int channels,int frames) noexcept;
     int64_t bytes = 0;
     std::atomic<bool> playing{false};
     std::atomic<double> visiblePosition{0}, requestedPosition{0};

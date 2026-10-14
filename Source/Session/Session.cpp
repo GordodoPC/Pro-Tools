@@ -51,7 +51,7 @@ bool readMix(const juce::var& v,Track& t,double rate,juce::String& error){
 }
 bool Session::save(const juce::File& file, const AudioEngine& engine, juce::String& error) {
     auto root = std::make_unique<juce::DynamicObject>();
-    root->setProperty("format", "nova-daw-session"); root->setProperty("version", 5);root->setProperty("midiPpq",midiPpq);root->setProperty("metronome",engine.metronomeEnabled.load());
+    root->setProperty("format", "nova-daw-session"); root->setProperty("version", 6);root->setProperty("midiPpq",midiPpq);root->setProperty("metronome",engine.metronomeEnabled.load());
     const auto& record=engine.recordingOptions;auto settings=std::make_unique<juce::DynamicObject>();settings->setProperty("punch",record.punch);settings->setProperty("loop",record.loop);settings->setProperty("punchIn",record.punchIn);settings->setProperty("punchOut",record.punchOut);settings->setProperty("preRoll",record.preRoll);settings->setProperty("postRoll",record.postRoll);settings->setProperty("loopStart",record.loopStart);settings->setProperty("loopEnd",record.loopEnd);root->setProperty("recording",juce::var(settings.release()));
     root->setProperty("masterGain", engine.masterGain.load());
     root->setProperty("masterMute",engine.masterMute.load());root->setProperty("masterInserts",insertState(engine.masterInserts));
@@ -76,6 +76,8 @@ bool Session::save(const juce::File& file, const AudioEngine& engine, juce::Stri
         for(const auto& r:t.regions) {
             auto item=std::make_unique<juce::DynamicObject>();
             item->setProperty("file",r.asset->source.getRelativePathFrom(file.getParentDirectory()));
+            item->setProperty("fadeIn",r.fadeIn);item->setProperty("fadeOut",r.fadeOut);item->setProperty("fadeInCurve",int(r.fadeInCurve));item->setProperty("fadeOutCurve",int(r.fadeOutCurve));
+            item->setProperty("original",r.original?r.original->source.getRelativePathFrom(file.getParentDirectory()):juce::String{});item->setProperty("originalOffset",r.originalOffset);item->setProperty("originalLength",r.originalLength);item->setProperty("stretch",r.stretch);item->setProperty("semitones",r.semitones);item->setProperty("cents",r.cents);
             item->setProperty("takeId",int64_t(r.takeId));item->setProperty("start",r.start); item->setProperty("offset",r.offset); item->setProperty("length",r.length);
             regions.add(juce::var(item.release()));
         }
@@ -92,11 +94,11 @@ bool Session::load(const juce::File& file, AudioEngine& engine, juce::String& er
     if(file.getSize()>64LL*1024*1024){error="Sessao excede o limite de 64 MiB de metadados.";return false;}
     juce::var data;
     if (juce::JSON::parse(file.loadFileAsString(), data).failed() || !data.isObject()
-        || data["format"].toString() != "nova-daw-session" || !data["version"].isInt() || (int(data["version"])<1 || int(data["version"])>5)
+        || data["format"].toString() != "nova-daw-session" || !data["version"].isInt() || (int(data["version"])<1 || int(data["version"])>6)
         || !data["tracks"].isArray() || !numeric(data["masterGain"])) { error = "Sessao invalida ou versao nao suportada."; return false; }
     auto* rows = data["tracks"].getArray();
     if (rows->size() > AudioEngine::maxTracks) { error = "Sessao excede 64 faixas."; return false; }
-    const bool v2=int(data["version"])>=2,v3=int(data["version"])>=3,v4=int(data["version"])>=4,v5=int(data["version"])>=5;
+    const bool v2=int(data["version"])>=2,v3=int(data["version"])>=3,v4=int(data["version"])>=4,v5=int(data["version"])>=5,v6=int(data["version"])>=6;
     if(v4&&(!data["midiPpq"].isInt()||int(data["midiPpq"])!=midiPpq||!data["metronome"].isBool())){error="Relogio MIDI/metronomo invalido.";return false;}
     if(v2 && (!numeric(data["bpm"]) || !data["beatsPerBar"].isInt() || !data["beatUnit"].isInt()
         || !numeric(data["loopStart"]) || !numeric(data["loopEnd"]) || !data["loopEnabled"].isBool())) {
@@ -158,7 +160,15 @@ bool Session::load(const juce::File& file, AudioEngine& engine, juce::String& er
                 if(!std::isfinite(start) || !std::isfinite(offset) || !std::isfinite(length) || start<0 || start>86400
                     || offset<0 || length<=0 || offset+length>asset->duration()+1e-8 || start+length>86400){error="Regiao fora dos limites de audio ou de sessao (24h).";return false;}
                 uint64_t takeId=0;if(v5){if(!(item["takeId"].isInt()||item["takeId"].isInt64())||int64_t(item["takeId"])<0){error="Referencia de take invalida.";return false;}takeId=uint64_t(int64_t(item["takeId"]));}
-                entry.regions.push_back({0,asset,start,offset,length,takeId});
+                Track::Region region{0,asset,start,offset,length,takeId};
+                if(v6){for(const auto* key:{"fadeIn","fadeOut","originalOffset","originalLength","stretch","semitones","cents"})if(!numeric(item[key])||!std::isfinite(double(item[key]))){error="Edicao de audio invalida.";return false;}
+                    if(!item["fadeInCurve"].isInt()||!item["fadeOutCurve"].isInt()||int(item["fadeInCurve"])<0||int(item["fadeInCurve"])>2||int(item["fadeOutCurve"])<0||int(item["fadeOutCurve"])>2||!item["original"].isString()){error="Curva/referencia original invalida.";return false;}
+                    region.fadeIn=double(item["fadeIn"]);region.fadeOut=double(item["fadeOut"]);region.fadeInCurve=FadeCurve(int(item["fadeInCurve"]));region.fadeOutCurve=FadeCurve(int(item["fadeOutCurve"]));region.originalOffset=double(item["originalOffset"]);region.originalLength=double(item["originalLength"]);region.stretch=double(item["stretch"]);region.semitones=double(item["semitones"]);region.cents=double(item["cents"]);
+                    if(region.fadeIn<0||region.fadeOut<0||region.fadeIn>length||region.fadeOut>length||region.stretch<0.25||region.stretch>4||std::abs(region.semitones)>12||std::abs(region.cents)>100||region.originalOffset<0||region.originalLength<0){error="Fades/transformacao fora dos limites.";return false;}
+                    if(item["original"].toString().isNotEmpty()){region.original=loadAsset(item["original"]);if(!region.original)return false;if(region.originalLength<=0||region.originalOffset+region.originalLength>region.original->duration()+1e-8){error="Fonte original fora dos limites.";return false;}}
+                    else if(region.originalOffset!=0||region.originalLength!=0||region.stretch!=1||region.semitones!=0||region.cents!=0){error="Transformacao sem fonte original.";return false;}
+                }
+                entry.regions.push_back(std::move(region));
             }
         }else entry.regions.push_back({0,clip,0,0,clip->duration()});
         if(v4){entry.midi=bool(row["midiTrack"]);for(const auto& item:*row["midiClips"].getArray()){MidiClip midi;if(!readMidiClip(item,midi,error))return false;

@@ -1,5 +1,6 @@
 #include "EditorComponents.h"
 #include <cmath>
+#include "Audio/RegionAudio.h"
 namespace nova {
 namespace {
 const juce::Colour bg{0xff10151e},panel{0xff1c2532},line{0xff303b4e},accent{0xff59d9c3};
@@ -109,7 +110,7 @@ void Timeline::paint(juce::Graphics& g){
                 const double noteStart=ticksToSeconds(clip.start+std::max(note.tick,clip.offset)-clip.offset,engine.bpm.load());const double noteEnd=ticksToSeconds(clip.start+std::min(note.tick+note.length,clip.offset+clip.length)-clip.offset,engine.bpm.load());
                 g.fillRect(float(noteStart*pixelsPerSecond),box.getY()+25+(127-note.pitch)/127.0f*std::max(10.0f,box.getHeight()-35),float(std::max(2.0,(noteEnd-noteStart)*pixelsPerSecond)),3.0f);}}
         for(const auto& r:t.regions){auto box=boundsFor(i,r);if(!box.intersects(visible.toFloat()))continue;
-            const bool selected=editor.selectedRegion==r.id;const auto colour=juce::Colour(t.colour);
+            const bool selected=editor.isSelected(r.id);const auto colour=juce::Colour(t.colour);
             g.setColour(colour.withAlpha(selected?0.34f:0.17f));g.fillRoundedRectangle(box,3);g.setColour(selected?accent:colour);g.drawRoundedRectangle(box,3,selected?2.0f:1.0f);
             g.setFont(12.0f);g.drawText(r.asset->name,box.toNearestInt().reduced(6).removeFromTop(18),juce::Justification::centredLeft);
             const int left=std::max(visible.getX(),static_cast<int>(box.getX())),right=std::min(visible.getRight(),static_cast<int>(box.getRight()));
@@ -117,6 +118,7 @@ void Timeline::paint(juce::Graphics& g){
             for(int x=left;x<right;++x){if(r.asset->waveform.empty())break;const double src=(x/pixelsPerSecond-r.start+r.offset)/r.asset->duration();
                 const auto bin=std::min(r.asset->waveform.size()-1,static_cast<size_t>(std::max(0.0,src)*r.asset->waveform.size()));
                 const auto p=r.asset->waveform[bin];g.drawVerticalLine(x,centre-p.high*amplitude,centre-p.low*amplitude+1);}
+            if(r.fadeIn>0||r.fadeOut>0){juce::Path envelope;for(int k=0;k<=128;++k){const double local=r.length*k/128.0;const float value=regionEnvelope(r,std::min(local,r.length-1e-12));const float x=box.getX()+float(local*pixelsPerSecond),y=box.getBottom()-value*(box.getHeight()-25);if(k==0)envelope.startNewSubPath(x,y);else envelope.lineTo(x,y);}g.setColour(juce::Colours::white.withAlpha(0.75f));g.strokePath(envelope,juce::PathStrokeType(1.5f));}
         }
     }
     if(editor.rangeEnd>editor.rangeStart){g.setColour(accent.withAlpha(0.10f));g.fillRect(static_cast<float>(editor.rangeStart*pixelsPerSecond),0.0f,static_cast<float>((editor.rangeEnd-editor.rangeStart)*pixelsPerSecond),static_cast<float>(getHeight()));}
@@ -133,7 +135,7 @@ void Timeline::mouseDown(const juce::MouseEvent& e){
     if(engine.track(dragTrack).midiTrack){uint64_t id=0;for(const auto& clip:engine.track(dragTrack).midiClips){const double begin=ticksToSeconds(clip.start,engine.bpm.load()),end=ticksToSeconds(clip.start+clip.length,engine.bpm.load());if(time>=begin&&time<end){id=clip.id;break;}}
         editor.select(dragTrack,id);if(selectionChanged)selectionChanged();if(e.mods.isPopupMenu()&&midiEdit)midiEdit(dragTrack);return;}
     Track::Region* hit=nullptr;for(auto& r:engine.track(dragTrack).regions)if(boundsFor(dragTrack,r).contains(e.position)){hit=&r;break;}
-    editor.select(dragTrack,hit?hit->id:0);if(selectionChanged)selectionChanged();
+    if(hit&&(e.mods.isShiftDown()||e.mods.isCommandDown()))editor.toggleSelection(dragTrack,hit->id);else if(!hit||!editor.isSelected(hit->id))editor.select(dragTrack,hit?hit->id:0);else if(hit){editor.selectedTrack=dragTrack;editor.selectedRegion=hit->id;}if(selectionChanged)selectionChanged();
     if(e.mods.isPopupMenu()){juce::PopupMenu p;p.addItem(20,"Copy",hit!=nullptr);p.addItem(21,"Paste",editor.canPaste());p.addItem(22,"Delete",hit!=nullptr);p.addItem(23,"Split at cursor",hit!=nullptr);p.addItem(24,"Loop selected clip",hit!=nullptr);
         p.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),[safe=juce::Component::SafePointer<Timeline>(this)](int id){if(safe&&id&&safe->command)safe->command(id);});return;}
     if(tool==Tool::selector){dragging=true;dragOrigin=e.position.toInt();editor.rangeStart=editor.rangeEnd=time;return;}
@@ -146,6 +148,7 @@ void Timeline::mouseDown(const juce::MouseEvent& e){
 void Timeline::mouseDrag(const juce::MouseEvent& e){
     if(!dragging||resizing)return;const double time=editor.quantize(e.x/pixelsPerSecond);
     if(tool==Tool::selector){const double initial=editor.quantize(dragOrigin.x/pixelsPerSecond);editor.rangeStart=std::min(initial,time);editor.rangeEnd=std::max(initial,time);repaint();return;}
+    if(tool==Tool::slip){previewStart=dragRegion.start;previewEnd=dragRegion.end();previewTrack=dragTrack;repaint();return;}
     if(leftEdge){previewStart=std::clamp(time,std::max(0.0,dragRegion.start-dragRegion.offset),dragRegion.end()-1/dragRegion.asset->sampleRate);}
     else if(rightEdge){previewEnd=std::clamp(time,dragRegion.start+1/dragRegion.asset->sampleRate,dragRegion.start+dragRegion.asset->duration()-dragRegion.offset);}
     else {previewStart=editor.quantize(dragRegion.start+(e.x-dragOrigin.x)/pixelsPerSecond);previewEnd=previewStart+dragRegion.length;const int target=trackAt(e.y);if(target>=0)previewTrack=target;}
@@ -154,7 +157,8 @@ void Timeline::mouseDrag(const juce::MouseEvent& e){
 void Timeline::mouseUp(const juce::MouseEvent& e){
     if(!dragging)return;dragging=false;
     if(resizing){resizing=false;const int height=engine.track(dragTrack).height+static_cast<int>((e.y-dragOrigin.y)/verticalScale);apply([this,height]{editor.resizeTrack(dragTrack,height);return true;});}
-    else if(tool==Tool::selector){if(selectionChanged)selectionChanged();}
+    else if(tool==Tool::selector){editor.selectRange(dragTrack,editor.rangeStart,editor.rangeEnd);if(selectionChanged)selectionChanged();}
+    else if(tool==Tool::slip){const double delta=(e.x-dragOrigin.x)/pixelsPerSecond;apply([this,delta]{return editor.slip(delta);});}
     else if(leftEdge||rightEdge)apply([this]{return editor.trim(previewStart,previewEnd);});
     else apply([this]{return editor.move(previewStart,previewTrack);});
     repaint();

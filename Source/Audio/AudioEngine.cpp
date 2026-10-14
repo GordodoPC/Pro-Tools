@@ -1,5 +1,6 @@
 #include "AudioEngine.h"
 #include "AudioRecorder.h"
+#include "RegionAudio.h"
 #include "Midi/MidiIO.h"
 #include "Midi/MidiRuntime.h"
 #include <algorithm>
@@ -56,7 +57,7 @@ bool AudioEngine::addClip(std::unique_ptr<Clip> clip, juce::String& error) {
 void AudioEngine::recalculateMediaBytes() {
     MutationGuard mutation(*this);
     std::set<const Clip*> assets;
-    for(int i=0;i<count;++i) { assets.insert(track(i).clip.get()); for(const auto& r:track(i).regions)assets.insert(r.asset.get()); }
+    for(int i=0;i<count;++i) { assets.insert(track(i).clip.get()); for(const auto& r:track(i).regions){assets.insert(r.asset.get());assets.insert(r.original.get());} }
     bytes=0;
     for(const auto* asset:assets) if(asset) bytes+=static_cast<int64_t>(asset->samples.getNumSamples())*asset->samples.getNumChannels()*sizeof(float);
 }
@@ -81,7 +82,7 @@ bool AudioEngine::addSharedClip(std::shared_ptr<Clip> clip, juce::String& error)
 }
 void AudioEngine::clear() {
     MutationGuard mutation(*this);for(auto& route:midiIO->routes)route=0;++midiIO->generation;midiRecording=false;
-    stop();recordingExtent=0;audioRecording=false;
+    stop();stopPreview();recordingExtent=0;audioRecording=false;
     for (auto& t : tracks) { t.regions.clear(); t.clip.reset();for(auto& p:t.inserts)p.reset();t.instrument.reset();t.midiClips.clear();t.midiEvents.clear();t.midiTrack=false;t.midiArm=false;t.recordArm=false;t.monitorInput=false;t.takes.clear();t.activeTake=0;t.automation.clear(); }
     for(auto& p:masterInserts)p.reset();masterMute=false;masterClipped=false;masterPeak=masterRms=0;smoothingInitialized=false;
     count = 0; bytes = 0; recordingOptions={};masterGain = 1;compensation={};visibleLatency=0;pdcReady=true;configurationError.clear();
@@ -117,7 +118,7 @@ AudioEngine::MutationGuard::MutationGuard(AudioEngine& e):engine(e){
 }
 AudioEngine::MutationGuard::~MutationGuard(){if(--engine.mutationDepth==0)engine.processingGate.fetch_and(~2u,std::memory_order_release);}
 AudioEngine::~AudioEngine()=default;
-void AudioEngine::pause(){playing=false;midiRecording=false;audioRecording=false;midiIO->panic=true;}
+void AudioEngine::pause(){previewPlaying=false;playing=false;midiRecording=false;audioRecording=false;midiIO->panic=true;}
 AudioEngine::AudioEngine() {
     midiIO=std::make_unique<MidiIO>();
     for(auto& buffer:channelBuffers)buffer.setSize(2,mixBlockSize);
@@ -221,7 +222,7 @@ void AudioEngine::renderInternal(float* const* output,int channels,int frames,do
     if(recorder&&audioRecording&&playing)recorder->capture(input,inputs,frames,renderPosition);
     for(int i=0;i<count;++i){auto& t=track(i);float peak=0;if(input&&!t.midiTrack&&!t.auxiliary&&t.recordInputLeft>=0&&t.recordInputLeft<inputs&&input[t.recordInputLeft])for(int sample=0;sample<frames;++sample)peak=std::max(peak,std::abs(input[t.recordInputLeft][sample]));if(input&&t.recordStereo&&t.recordInputRight>=0&&t.recordInputRight<inputs&&input[t.recordInputRight])for(int sample=0;sample<frames;++sample)peak=std::max(peak,std::abs(input[t.recordInputRight][sample]));t.inputPeak=peak;}
     consumeMidiInput(frames);bool liveScene=false;for(int i=0;i<count;++i)liveScene|=track(i).midiTrack||(monitoringAllowed&&track(i).monitorInput.load());
-    if(!playing&&!liveScene){masterPeak=masterRms=0;for(int i=0;i<count;++i)track(i).peak=track(i).rms=0;return;}
+    if(!playing&&!liveScene){masterPeak=masterRms=0;for(int i=0;i<count;++i)track(i).peak=track(i).rms=0;renderPreview(output,channels,frames);return;}
     float masterEnergy=0,masterMaximum=0;std::array<float,maxTracks> channelEnergy{},channelMaximum{};
     for(int offset=0;offset<frames;offset+=mixBlockSize){const int size=std::min(mixBlockSize,frames-offset);renderBlock(output,channels,offset,size);
         masterEnergy+=blockMasterRms*blockMasterRms*size;masterMaximum=std::max(masterMaximum,blockMasterPeak);
@@ -229,8 +230,15 @@ void AudioEngine::renderInternal(float* const* output,int channels,int frames,do
         if(!playing&&!liveScene)break;}
     // Publish meters after the full callback; UI readers never see an intermediate clear.
     masterPeak=masterMaximum;masterRms=std::sqrt(masterEnergy/frames);for(int i=0;i<count;++i){track(i).peak=channelMaximum[i];track(i).rms=std::sqrt(channelEnergy[i]/frames);}
+    renderPreview(output,channels,frames);
     if(midiRecording)midiRecordEndTick=secondsToTicks(renderPosition,bpm.load());
     visiblePosition=midiRecording||audioRecording||(liveScene&&!playing)?renderPosition:std::min(renderPosition,duration());
+}
+void AudioEngine::startPreview(std::shared_ptr<Clip> clip){MutationGuard guard(*this);pause();previewPlaying=false;previewClip=std::move(clip);previewCursor=0;previewPlaying=bool(previewClip);}
+void AudioEngine::stopPreview(){MutationGuard guard(*this);previewPlaying=false;previewClip.reset();previewCursor=0;}
+void AudioEngine::renderPreview(float* const* output,int channels,int frames)noexcept{if(!previewPlaying||!previewClip)return;const auto& clip=*previewClip;const double step=clip.sampleRate/sampleRate();float peak=masterPeak;
+    for(int n=0;n<frames;++n){if(previewCursor>=clip.samples.getNumSamples()){previewPlaying=false;break;}const int a=int(previewCursor),b=std::min(a+1,clip.samples.getNumSamples()-1);const float fraction=float(previewCursor-a);float values[2]{};for(int c=0;c<2;++c){const int source=std::min(c,clip.samples.getNumChannels()-1);const float* data=clip.samples.getReadPointer(source);values[c]=(data[a]+(data[b]-data[a])*fraction)*0.25f;}if(channels==1){if(output[0])output[0][n]=std::clamp(output[0][n]+(values[0]+values[1])*0.5f,-1.0f,1.0f);}
+        else for(int c=0;c<2;++c)if(output[c])output[c][n]=std::clamp(output[c][n]+values[c],-1.0f,1.0f);peak=std::max({peak,std::abs(values[0]),std::abs(values[1])});previewCursor+=step;}masterPeak=peak;
 }
 void AudioEngine::renderBlock(float* const* output,int channels,int offset,int frames) noexcept {
     const bool active=playing.load();if(midiIO->panic.exchange(false))resumeMidi.fill(true);
@@ -263,13 +271,9 @@ void AudioEngine::renderBlock(float* const* output,int channels,int offset,int f
             const float p=smoothPan[i].getNextValue();const float in=smoothInput[i].getNextValue();
             if(active&&!t.auxiliary&&!t.midiTrack)for(const auto& region:t.regions){
                 if(!region.asset || time<region.start || time>=region.end())continue;const auto& clip=*region.asset;
-                const double pos=(time-region.start+region.offset)*clip.sampleRate;
-                if(pos<0 || pos>=clip.samples.getNumSamples())continue;
-                const int a=static_cast<int>(pos),b=std::min(a+1,clip.samples.getNumSamples()-1);const float frac=static_cast<float>(pos-a);
                 const bool mono=clip.samples.getNumChannels()==1;
                 const float lg=mono?std::sqrt((1-p)*0.5f):(p>0?1-p:1),rg=mono?std::sqrt((1+p)*0.5f):(p<0?1+p:1);
-                const auto* l=clip.samples.getReadPointer(0);const auto* r=clip.samples.getReadPointer(mono?0:1);
-                buffer.addSample(0,s,(l[a]+(l[b]-l[a])*frac)*lg);buffer.addSample(1,s,(r[a]+(r[b]-r[a])*frac)*rg);
+                buffer.addSample(0,s,regionSample(region,0,time-region.start)*lg);buffer.addSample(1,s,regionSample(region,mono?0:1,time-region.start)*rg);
             }
             if(monitoringAllowed&&t.monitorInput&&!t.midiTrack&&!t.auxiliary&&renderInputs&&t.recordInputLeft>=0&&t.recordInputLeft<renderInputCount&&renderInputs[t.recordInputLeft]){
                 const float value=renderInputs[t.recordInputLeft][offset+s]*t.recordGain.load();const int right=t.recordStereo?t.recordInputRight:t.recordInputLeft;

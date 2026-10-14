@@ -261,3 +261,19 @@ Nenhuma segurança irrestrita de plugin externo é declarada.
 
 Builds locais; sem instalação de plugins ou push remoto. Relatórios descrevem
 os testes realmente executados e os pendentes separadamente.
+
+## Continuidade validada até 0.6.0
+
+Fases 4, 5 e 6 implementadas depois da estabilização crítica: MIDI/VST3i,
+captura WAV com worker e edição/render offline. Sessões agora v6, mantendo leitura
+1–5. Debug/Release 12/12 CTest, 503 verificações + dois smoke tests. Fades/preview/
+captura tiveram zero C++ new observado no callback em seus testes; lifecycle/
+PDC/concorrência existentes continuam passando. Ver phase4/5/6-report.md.
+
+Novo stress curto Release final (10,020 s): 1180 callbacks, 1 deadline overrun,
+max 6,944 ms, CPU 12,63% de um core, pico privado 88.354.816 bytes, zero C++ new
+observado. Evidência em build/ninja-release/stability/stability-result.json.
+A execução anterior curta teve zero overruns. Não é substituição do ensaio
+isolado de 300 s, que registrou 7 violações de prazo; hard real-time continua sem
+certificação. Gravação física multicanal, MIDI físico e terceiros continuam pendentes.
+Nenhum módulo externo foi instalado nem feito push remoto.

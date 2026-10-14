@@ -3,78 +3,80 @@
 #include <cmath>
 namespace nova {
 double EditModel::quantize(double time) const {
-    if (!std::isfinite(time)) return 0;
-    const double grid = 60.0 / engine.bpm * (4.0 / engine.beatUnit) * gridBeats;
-    return std::max(0.0, snap && grid > 0 ? std::round(time / grid) * grid : time);
+    if(!std::isfinite(time))return 0;const double grid=60.0/engine.bpm*(4.0/engine.beatUnit)*gridBeats;
+    return std::max(0.0,snap&&grid>0?std::round(time/grid)*grid:time);
 }
-Track::Region* EditModel::selected() {
-    if (selectedTrack < 0 || selectedTrack >= engine.trackCount()) return nullptr;
-    for (auto& region : engine.track(selectedTrack).regions) if (region.id == selectedRegion) return &region;
-    return nullptr;
+Track::Region* EditModel::selected(){if(selectedTrack<0||selectedTrack>=engine.trackCount())return nullptr;for(auto& r:engine.track(selectedTrack).regions)if(r.id==selectedRegion)return &r;return nullptr;}
+void EditModel::select(int track,uint64_t id){selectedTrack=track;selectedRegion=id;selection.clear();if(id)selection.insert(id);rangeStart=rangeEnd=0;}
+void EditModel::toggleSelection(int track,uint64_t id){if(!id)return;if(selection.contains(id))selection.erase(id);else selection.insert(id);selectedTrack=track;selectedRegion=selection.contains(id)?id:0;if(!selectedRegion)for(int i=0;i<engine.trackCount();++i)for(const auto& r:engine.track(i).regions)if(selection.contains(r.id)){selectedTrack=i;selectedRegion=r.id;return;}}
+void EditModel::selectAll(){selection.clear();for(int i=0;i<engine.trackCount();++i)for(const auto& r:engine.track(i).regions){selection.insert(r.id);if(!selectedRegion){selectedRegion=r.id;selectedTrack=i;}}}
+void EditModel::selectRange(int track,double start,double end){select(track,0);rangeStart=start;rangeEnd=end;if(track<0||track>=engine.trackCount())return;for(const auto& r:engine.track(track).regions)if(r.start<end&&r.end()>start){selection.insert(r.id);if(!selectedRegion)selectedRegion=r.id;}}
+std::vector<EditModel::Copied> EditModel::selectedCopies()const{std::vector<Copied> result;for(int i=0;i<engine.trackCount();++i)for(const auto& r:engine.track(i).regions)if(isSelected(r.id))result.push_back({i,r});return result;}
+EditModel::State EditModel::capture()const{State state{{},selectedTrack,selectedRegion,selection};for(int i=0;i<engine.trackCount();++i){const auto& t=engine.track(i);state.rows.push_back({t.regions,t.name,t.colour,t.height,t.activeTake});}return state;}
+void EditModel::restore(const State& state){for(int i=0;i<engine.trackCount()&&i<int(state.rows.size());++i){const auto& row=state.rows[i];auto& t=engine.track(i);t.regions=row.regions;t.name=row.name;t.colour=row.colour;t.height=row.height;t.activeTake=row.activeTake;}selectedTrack=state.selectedTrack;selectedRegion=state.selectedRegion;selection=state.selection;if(engine.loopEnd>engine.duration())engine.loopEnabled=false;}
+void EditModel::boundHistory(){auto size=[&]{std::set<const Clip*> assets;auto row=[&](const auto& regions){for(const auto& r:regions){assets.insert(r.asset.get());assets.insert(r.original.get());}};for(int i=0;i<engine.trackCount();++i){assets.insert(engine.track(i).clip.get());row(engine.track(i).regions);}for(const auto& state:past)for(const auto& r:state.rows)row(r.regions);for(const auto& state:future)for(const auto& r:state.rows)row(r.regions);for(const auto& item:clipboard){assets.insert(item.region.asset.get());assets.insert(item.region.original.get());}int64_t bytes=0;for(const auto* asset:assets)if(asset)bytes+=int64_t(asset->samples.getNumSamples())*asset->samples.getNumChannels()*4;return bytes;};
+    while(size()>AudioEngine::maxSessionBytes*2&&(!past.empty()||!future.empty())){if(!past.empty())past.erase(past.begin());else future.erase(future.begin());}}
+void EditModel::checkpoint(){past.push_back(capture());if(past.size()>64)past.erase(past.begin());future.clear();boundHistory();}
+void EditModel::reset(){past.clear();future.clear();clipboard.clear();select(-1,0);rangeStart=rangeEnd=0;}
+void EditModel::fitFades(Track::Region& r){r.fadeIn=std::clamp(r.fadeIn,0.0,r.length);r.fadeOut=std::clamp(r.fadeOut,0.0,r.length);}
+bool EditModel::move(double start,int destination){auto* primary=selected();if(!primary||!std::isfinite(start))return false;const double delta=std::max(0.0,start)-primary->start;const int trackDelta=destination-selectedTrack;const auto items=selectedCopies();if(items.empty()||(delta==0&&trackDelta==0))return false;
+    std::array<int,AudioEngine::maxTracks> counts{};for(int i=0;i<engine.trackCount();++i)counts[i]=int(engine.track(i).regions.size());
+    for(const auto& item:items){const int target=item.track+trackDelta;if(target<0||target>=engine.trackCount()||engine.track(target).auxiliary||engine.track(target).midiTrack||item.region.start+delta<0||item.region.end()+delta>86400)return false;--counts[item.track];++counts[target];}
+    for(int n:counts)if(n>AudioEngine::maxRegionsPerTrack)return false;
+    const double boundary=primary->end();if(ripple&&trackDelta==0)for(const auto& r:engine.track(selectedTrack).regions)if(!isSelected(r.id)&&r.start>=boundary&&(r.start+delta<0||r.end()+delta>86400))return false;
+    checkpoint();if(ripple&&trackDelta==0)for(auto& r:engine.track(selectedTrack).regions)if(!isSelected(r.id)&&r.start>=boundary)r.start+=delta;
+    for(int i=0;i<engine.trackCount();++i)std::erase_if(engine.track(i).regions,[&](const auto& r){return isSelected(r.id);});for(auto item:items){item.region.start+=delta;if(trackDelta!=0)item.region.takeId=0;engine.track(item.track+trackDelta).regions.push_back(std::move(item.region));}selectedTrack=destination;return true;
 }
-void EditModel::select(int track, uint64_t id) { selectedTrack = track; selectedRegion = id; rangeStart=rangeEnd=0; }
-EditModel::State EditModel::capture() const {
-    State state{{}, selectedTrack, selectedRegion};
-    for (int i = 0; i < engine.trackCount(); ++i) {
-        const auto& t = engine.track(i); state.rows.push_back({t.regions,t.name,t.colour,t.height});
-    }
-    return state;
+bool EditModel::trim(double start,double end){auto* r=selected();if(!r||!std::isfinite(start)||!std::isfinite(end))return false;const double earliest=std::max(0.0,r->start-r->offset),latest=std::min(86400.0,r->start+r->asset->duration()-r->offset);start=std::clamp(start,earliest,latest);end=std::clamp(end,start,latest);if(end-start<1/r->asset->sampleRate||(start==r->start&&end==r->end()))return false;
+    const double boundary=r->end(),delta=end-boundary;if(ripple)for(const auto& other:engine.track(selectedTrack).regions)if(other.id!=r->id&&other.start>=boundary&&(other.start+delta<0||other.end()+delta>86400))return false;
+    checkpoint();r->offset+=start-r->start;r->start=start;r->length=end-start;fitFades(*r);if(ripple)for(auto& other:engine.track(selectedTrack).regions)if(other.id!=r->id&&other.start>=boundary)other.start+=delta;return true;
 }
-void EditModel::restore(const State& state) {
-    for (int i = 0; i < engine.trackCount() && i < static_cast<int>(state.rows.size()); ++i) {
-        const auto& row = state.rows[static_cast<size_t>(i)]; auto& t = engine.track(i);
-        t.regions=row.regions; t.name=row.name; t.colour=row.colour; t.height=row.height;
-    }
-    selectedTrack=state.selectedTrack; selectedRegion=state.selectedRegion;
-    if (engine.loopEnd.load()>engine.duration()) engine.loopEnabled=false;
+bool EditModel::slip(double delta){const auto items=selectedCopies();if(items.empty()||!std::isfinite(delta)||delta==0)return false;for(const auto& item:items)if(item.region.offset+delta<0||item.region.offset+delta+item.region.length>item.region.asset->duration()+1e-8)return false;
+    checkpoint();for(int i=0;i<engine.trackCount();++i)for(auto& r:engine.track(i).regions)if(isSelected(r.id))r.offset+=delta;return true;
 }
-void EditModel::checkpoint() { past.push_back(capture()); if(past.size()>64) past.erase(past.begin()); future.clear(); }
-void EditModel::reset() { past.clear(); future.clear(); clipboard.reset(); select(-1,0); rangeStart=rangeEnd=0; }
-bool EditModel::move(double start, int destination) {
-    auto* r=selected();
-    if (!r || !std::isfinite(start) || destination<0 || destination>=engine.trackCount() || engine.track(destination).auxiliary || engine.track(destination).midiTrack) return false;
-    if (destination!=selectedTrack && engine.track(destination).regions.size()>=AudioEngine::maxRegionsPerTrack) return false;
-    start=std::max(0.0,start);
-    if (start+r->length>86400) return false;
-    if(destination==selectedTrack && std::abs(r->start-start)<1e-9) return false;
-    checkpoint(); auto copy=*r; copy.start=start;
-    auto& source=engine.track(selectedTrack).regions;
-    source.erase(std::remove_if(source.begin(),source.end(),[&](const auto& item){return item.id==copy.id;}),source.end());
-    engine.track(destination).regions.push_back(std::move(copy)); selectedTrack=destination;
-    return true;
+bool EditModel::split(double time){auto* r=selected();if(!r||!std::isfinite(time)||time<=r->start||time>=r->end()||engine.track(selectedTrack).regions.size()>=AudioEngine::maxRegionsPerTrack)return false;const double left=time-r->start;if(left<1/r->asset->sampleRate||r->length-left<1/r->asset->sampleRate)return false;
+    checkpoint();auto right=*r;right.id=engine.newRegionId();right.start=time;right.offset+=left;right.length-=left;right.fadeIn=0;r->length=left;r->fadeOut=0;fitFades(*r);fitFades(right);engine.track(selectedTrack).regions.push_back(std::move(right));return true;
 }
-bool EditModel::trim(double start, double end) {
-    auto* r=selected(); if(!r || !std::isfinite(start) || !std::isfinite(end)) return false;
-    const double earliest=std::max(0.0,r->start-r->offset);
-    const double latest=std::min(86400.0,r->start+(r->asset->duration()-r->offset));
-    start=std::clamp(start,earliest,latest); end=std::clamp(end,start,latest);
-    if(end-start<1/r->asset->sampleRate || (start==r->start && end==r->end())) return false;
-    checkpoint(); r->offset+=start-r->start; r->start=start; r->length=end-start; return true;
+bool EditModel::erase(){const auto items=selectedCopies();if(items.empty())return false;checkpoint();for(int i=0;i<engine.trackCount();++i){auto& rows=engine.track(i).regions;std::vector<std::pair<double,double>> spans;for(const auto& r:rows)if(isSelected(r.id))spans.emplace_back(r.start,r.end());std::sort(spans.begin(),spans.end());std::vector<std::pair<double,double>> merged;for(auto interval:spans){if(!merged.empty()&&interval.first<=merged.back().second)merged.back().second=std::max(merged.back().second,interval.second);else merged.push_back(interval);}
+        std::erase_if(rows,[&](const auto& r){return isSelected(r.id);});if(ripple)for(auto& r:rows){double shift=0;for(auto [begin,end]:merged)if(r.start>=end)shift+=end-begin;r.start-=shift;}}
+    selectedRegion=0;selection.clear();return true;
 }
-bool EditModel::split(double time) {
-    auto* r=selected(); if(!r || !std::isfinite(time) || time<=r->start || time>=r->end()
-        || engine.track(selectedTrack).regions.size()>=AudioEngine::maxRegionsPerTrack) return false;
-    const double left=time-r->start;
-    if(left<1/r->asset->sampleRate || r->length-left<1/r->asset->sampleRate) return false;
-    checkpoint(); auto right=*r; right.id=engine.newRegionId(); right.start=time;
-    right.offset+=left; right.length-=left; r->length=left;
-    engine.track(selectedTrack).regions.push_back(std::move(right)); return true;
+bool EditModel::copy(){clipboard=selectedCopies();return !clipboard.empty();}
+bool EditModel::paste(int track,double time){if(clipboard.empty()||!std::isfinite(time)||time<0)return false;int firstTrack=AudioEngine::maxTracks;double firstTime=86400;for(const auto& item:clipboard){firstTrack=std::min(firstTrack,item.track);firstTime=std::min(firstTime,item.region.start);}std::array<int,AudioEngine::maxTracks> additions{};
+    for(const auto& item:clipboard){const int target=track+item.track-firstTrack;const double start=time+item.region.start-firstTime;if(target<0||target>=engine.trackCount()||engine.track(target).auxiliary||engine.track(target).midiTrack||start+item.region.length>86400||++additions[target]+engine.track(target).regions.size()>AudioEngine::maxRegionsPerTrack)return false;}
+    std::set<const Clip*> assets;for(int i=0;i<engine.trackCount();++i){assets.insert(engine.track(i).clip.get());for(const auto& r:engine.track(i).regions){assets.insert(r.asset.get());assets.insert(r.original.get());}}for(const auto& item:clipboard){assets.insert(item.region.asset.get());assets.insert(item.region.original.get());}int64_t bytes=0;for(const auto* asset:assets)if(asset)bytes+=int64_t(asset->samples.getNumSamples())*asset->samples.getNumChannels()*4;if(bytes>AudioEngine::maxSessionBytes)return false;
+    checkpoint();selection.clear();selectedRegion=0;for(auto item:clipboard){const int target=track+item.track-firstTrack;item.region.id=engine.newRegionId();if(target!=item.track)item.region.takeId=0;item.region.start=time+item.region.start-firstTime;selection.insert(item.region.id);if(!selectedRegion){selectedTrack=target;selectedRegion=item.region.id;}engine.track(target).regions.push_back(std::move(item.region));}return true;
 }
-bool EditModel::erase() {
-    if(!selected()) return false; checkpoint(); auto& rows=engine.track(selectedTrack).regions;
-    rows.erase(std::remove_if(rows.begin(),rows.end(),[&](const auto& item){return item.id==selectedRegion;}),rows.end());
-    selectedRegion=0; return true;
+bool EditModel::duplicate(){const auto items=selectedCopies();if(items.empty())return false;double end=0;int row=AudioEngine::maxTracks;for(const auto& item:items){end=std::max(end,item.region.end());row=std::min(row,item.track);}return copy()&&paste(row,end);}
+bool EditModel::setFades(double in,double out,FadeCurve a,FadeCurve b){const auto items=selectedCopies();if(items.empty()||!std::isfinite(in)||!std::isfinite(out)||in<0||out<0||int(a)<0||int(a)>2||int(b)<0||int(b)>2)return false;for(const auto& item:items)if(in>item.region.length||out>item.region.length)return false;checkpoint();for(int i=0;i<engine.trackCount();++i)for(auto& r:engine.track(i).regions)if(isSelected(r.id)){r.fadeIn=in;r.fadeOut=out;r.fadeInCurve=a;r.fadeOutCurve=b;}return true;}
+bool EditModel::crossfade(double seconds,FadeCurve curve){if(!selected()||!std::isfinite(seconds)||seconds<=0||int(curve)<0||int(curve)>2)return false;auto& regions=engine.track(selectedTrack).regions;std::vector<Track::Region*> items;for(auto& r:regions)if(isSelected(r.id))items.push_back(&r);if(items.size()!=2)return false;if(items[0]->start>items[1]->start)std::swap(items[0],items[1]);auto& left=*items[0];auto& right=*items[1];double overlap=left.end()-right.start;
+    if(overlap<0)return false;if(overlap==0){seconds=std::min({seconds,left.asset->duration()-left.offset-left.length,right.length});if(seconds<=0||left.end()+seconds>86400)return false;}else seconds=overlap;if(seconds>left.length||seconds>right.length)return false;
+    checkpoint();if(overlap==0)left.length+=seconds;left.fadeOut=right.fadeIn=seconds;left.fadeOutCurve=right.fadeInCurve=curve;return true;
 }
-bool EditModel::copy() { if(auto* r=selected()){clipboard=*r;return true;} return false; }
-bool EditModel::paste(int track, double time) {
-    if(!clipboard || track<0 || track>=engine.trackCount() || engine.track(track).auxiliary || engine.track(track).midiTrack || !std::isfinite(time)
-        || engine.track(track).regions.size()>=AudioEngine::maxRegionsPerTrack || std::max(0.0,time)+clipboard->length>86400) return false;
-    checkpoint(); auto r=*clipboard; r.id=engine.newRegionId(); r.start=std::max(0.0,time);
-    selectedTrack=track; selectedRegion=r.id; engine.track(track).regions.push_back(std::move(r)); return true;
+bool EditModel::comp(uint64_t id,double start,double end,double fade,juce::String& error){if(selectedTrack<0||selectedTrack>=engine.trackCount()||!std::isfinite(start)||!std::isfinite(end)||!std::isfinite(fade)||start<0||end<=start||fade<0||fade>(end-start)/2)return false;auto& t=engine.track(selectedTrack);const Track::Take* take=nullptr;for(const auto& item:t.takes)if(item.id==id)take=&item;if(!take||start<take->start||end>take->start+take->length){error="Trecho fora do take selecionado.";return false;}
+    std::shared_ptr<Clip> asset=AudioEngine::loadWav(take->file,error);if(!asset||end-take->start>asset->duration()+1e-8)return false;std::vector<Track::Region> result;double leftFade=fade,rightFade=fade;bool leftBoundary=false,rightBoundary=false;
+    for(const auto& r:t.regions){if(r.start<start&&r.end()>=start){leftBoundary=true;leftFade=std::min(leftFade,std::max(0.0,r.asset->duration()-r.offset-(start-r.start)));}if(r.start<=end&&r.end()>end){rightBoundary=true;rightFade=std::min(rightFade,std::max(0.0,r.offset+end-r.start));}}
+    if(!leftBoundary)leftFade=0;if(!rightBoundary)rightFade=0;
+    for(const auto& r:t.regions){if(r.end()<start||r.start>end){result.push_back(r);continue;}
+        if(r.start<start){auto left=r;left.length=start+leftFade-r.start;left.fadeOut=leftFade;left.fadeOutCurve=FadeCurve::equalPower;fitFades(left);result.push_back(std::move(left));leftBoundary=true;}
+        if(r.end()>end){auto right=r;right.id=engine.newRegionId();const double newStart=end-rightFade;right.offset+=newStart-r.start;right.start=newStart;right.length=r.end()-newStart;right.fadeIn=rightFade;right.fadeInCurve=FadeCurve::equalPower;fitFades(right);result.push_back(std::move(right));rightBoundary=true;}}
+    Track::Region added{engine.newRegionId(),asset,start,start-take->start,end-start,id};added.fadeIn=leftFade;added.fadeOut=rightFade;added.fadeInCurve=added.fadeOutCurve=FadeCurve::equalPower;result.push_back(added);
+    if(result.size()>AudioEngine::maxRegionsPerTrack){error="Comp excede limite de regioes.";return false;}const auto before=t.regions;t.regions=result;engine.recalculateMediaBytes();const bool fits=engine.mediaBytes()<=AudioEngine::maxSessionBytes;t.regions=before;engine.recalculateMediaBytes();if(!fits){error="Comp excede 512 MiB de audio.";return false;}checkpoint();t.regions=std::move(result);t.activeTake=0;select(selectedTrack,added.id);engine.recalculateMediaBytes();return true;
 }
-bool EditModel::undo() { if(past.empty()) return false; future.push_back(capture()); restore(past.back()); past.pop_back(); return true; }
-bool EditModel::redo() { if(future.empty()) return false; past.push_back(capture()); restore(future.back()); future.pop_back(); return true; }
-void EditModel::rename(int i,const juce::String& name) { if(i<0 || i>=engine.trackCount() || name.trim().isEmpty() || engine.track(i).name==name.trim().substring(0,80))return;checkpoint();engine.track(i).name=name.trim().substring(0,80); }
-void EditModel::recolour(int i,uint32_t colour) { if(i<0 || i>=engine.trackCount() || engine.track(i).colour==colour)return;checkpoint();engine.track(i).colour=colour; }
-void EditModel::resizeTrack(int i,int height) { if(i<0 || i>=engine.trackCount() || engine.track(i).height==std::clamp(height,100,320))return;checkpoint();engine.track(i).height=std::clamp(height,100,320); }
+bool EditModel::adoptTransform(const Track::Region& expected,std::shared_ptr<Clip> clip,double stretch,double semitones,double cents,juce::String& error){auto* r=selected();if(!r||r->id!=expected.id||r->asset!=expected.asset||r->offset!=expected.offset||r->length!=expected.length||r->start!=expected.start||!clip){error="Clip mudou durante processamento; cache preservado.";return false;}
+    auto replacement=*r;if(!replacement.original){replacement.original=r->asset;replacement.originalOffset=r->offset;replacement.originalLength=r->length;}replacement.asset=std::move(clip);replacement.offset=0;replacement.length=replacement.asset->duration();replacement.stretch=stretch;replacement.semitones=semitones;replacement.cents=cents;fitFades(replacement);
+    if(replacement.end()>86400)return false;const auto before=*r;*r=replacement;engine.recalculateMediaBytes();const bool fits=engine.mediaBytes()<=AudioEngine::maxSessionBytes;*r=before;engine.recalculateMediaBytes();if(!fits){error="Resultado + fontes excedem 512 MiB na sessao; arquivo permanece no cache.";return false;}
+    checkpoint();*r=std::move(replacement);engine.recalculateMediaBytes();boundHistory();return true;
+}
+bool EditModel::revertOriginal(){auto* r=selected();if(!r||!r->original)return false;checkpoint();r->asset=r->original;r->offset=r->originalOffset;r->length=r->originalLength;r->original.reset();r->originalOffset=r->originalLength=0;r->stretch=1;r->semitones=r->cents=0;fitFades(*r);engine.recalculateMediaBytes();return true;}
+bool EditModel::adoptConsolidated(std::shared_ptr<Clip> clip,double start,double end,juce::String& error){if(!clip||selectedTrack<0||selectedTrack>=engine.trackCount()||!std::isfinite(start)||!std::isfinite(end)||start<0||end<=start||end>86400)return false;auto& t=engine.track(selectedTrack);if(t.auxiliary||t.midiTrack)return false;
+    const auto before=t.regions;std::vector<Track::Region> next;for(const auto& r:before){if(!isSelected(r.id)||r.end()<=start||r.start>=end){next.push_back(r);continue;}if(r.start<start){auto left=r;left.length=start-r.start;left.fadeOut=0;fitFades(left);next.push_back(std::move(left));}if(r.end()>end){auto right=r;right.id=engine.newRegionId();right.offset+=end-r.start;right.start=end;right.length=r.end()-end;right.fadeIn=0;fitFades(right);next.push_back(std::move(right));}}
+    Track::Region added{engine.newRegionId(),clip,start,0,clip->duration()};next.push_back(added);if(next.size()>AudioEngine::maxRegionsPerTrack){error="Consolidacao excede limite de regioes.";return false;}t.regions=next;engine.recalculateMediaBytes();const bool fits=engine.mediaBytes()<=AudioEngine::maxSessionBytes;t.regions=before;engine.recalculateMediaBytes();if(!fits){error="Audio consolidado excede limite de memoria; arquivo preservado.";return false;}
+    checkpoint();t.regions=std::move(next);t.activeTake=0;select(selectedTrack,added.id);engine.recalculateMediaBytes();boundHistory();return true;
+}
+bool EditModel::undo(){if(past.empty())return false;future.push_back(capture());restore(past.back());past.pop_back();engine.recalculateMediaBytes();boundHistory();return true;}
+bool EditModel::redo(){if(future.empty())return false;past.push_back(capture());restore(future.back());future.pop_back();engine.recalculateMediaBytes();boundHistory();return true;}
+void EditModel::rename(int i,const juce::String& name){if(i<0||i>=engine.trackCount()||name.trim().isEmpty()||engine.track(i).name==name.trim().substring(0,80))return;checkpoint();engine.track(i).name=name.trim().substring(0,80);}
+void EditModel::recolour(int i,uint32_t colour){if(i<0||i>=engine.trackCount()||engine.track(i).colour==colour)return;checkpoint();engine.track(i).colour=colour;}
+void EditModel::resizeTrack(int i,int height){if(i<0||i>=engine.trackCount()||engine.track(i).height==std::clamp(height,100,320))return;checkpoint();engine.track(i).height=std::clamp(height,100,320);}
 }

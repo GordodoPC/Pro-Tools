@@ -3,7 +3,7 @@
 #include "MixComponents.h"
 namespace nova {
 using ApplyEdit = std::function<bool(std::function<bool()>)>;
-enum class Tool { smart, grabber, trim, selector, split };
+enum class Tool { smart, grabber, trim, selector, split, slip };
 class TrackControls final : public juce::Component {
 public:
     TrackControls(AudioEngine&,EditModel&,int,bool,ApplyEdit,std::function<void()>);

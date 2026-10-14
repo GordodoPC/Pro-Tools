@@ -77,3 +77,8 @@ Executável Release: build/ninja-release/NovaDAW_artefacts/Release/NOVA DAW.exe.
   não ativados nesta validação; controles exibem “Ative entradas em Audio”.
 - Verificação visual do snapshot Debug realizada; controles/takes legíveis.
 - Sem instalação, dependências novas, configuração global ou push remoto.
+
+Regressão em 0.6.0: RecordingTests mantém 38 verificações em Debug/Release,
+com sessão atual v6 e leitura legada preservada. Recuperação fecha o worker
+interrompido antes de ler manifesto/WAV; mensagens antigas de erro são limpas
+pelas APIs. Hardware de captura continua não validado.

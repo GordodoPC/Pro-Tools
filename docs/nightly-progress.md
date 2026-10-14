@@ -51,3 +51,26 @@
 - UI nas duas configurações passou com captura simulada e sessão de duas faixas.
 - Hardware multicanal/latência de entrada/ASIO/disco cheio real continuam pendentes.
 - Próximo ciclo autorizado: Fase 6, edição de áudio, fades e render offline.
+
+## 2026-10-14 — conclusão funcional da Fase 6 (0.6.0)
+
+- Seleção múltipla, Slip/Ripple/duplicação/Undo, fades/crossfades que alteram sinal,
+  editor visual, phase vocoder próprio stretch/pitch/cents, cache/preview/revert,
+  comping e consolidação/bounce offline; sessão v6 compatível com 1–5.
+- Builds Debug/Release aprovados, CTest 12/12; 503 verificações + dois smoke tests.
+  Debug 29,97 s, Release 16,82 s; 55 novas verificações de edição/offline.
+- UI fase6 Debug/Release e regressão Edit/Mix das duas builds passaram. Primeiro
+  teste legado sem --session foi inválido por não carregar fixtures; repetição
+  documentada com demo.novadaw passou. Não foi registrado como aprovação.
+- Bounce próprio VST3 com track/bus/Master PDC 55 samples e pre-send/Read passou;
+  VST3i gera WAV não nulo. Capture/fades/preview sem C++ new observado no render.
+- Stress curto Release final: 10,020 s, 1180 callbacks, max6,944ms, 1 deadline overrun,
+  CPU12,63% de um core, pico88.354.816 bytes. Ensaio longo 3.5 preservado: 300 s
+  com sete violações; não se declara certificação hard real-time.
+- Fontes WAV byte-for-byte preservadas em transforms/comp/consolidate/bounce.
+- Hardware de entrada/MIDI físico/terceiros/qualidade perceptual e testes com IO
+  real adverso continuam pendentes; detalhes e roteiros nos relatórios 3.5/4/5/6.
+- Sem instalação, alteração global ou push. Fase5 no commit811ffeb; Fase4 86b44d5.
+
+- Revisão final: falha de alocação injetada no snapshot de bounce tratada em ambos
+  os builds, preservando a sessão; 55 checks de edição/offline, 503 no total.

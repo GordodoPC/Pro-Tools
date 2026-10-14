@@ -1,4 +1,4 @@
-# NOVA DAW — Fase 5 (0.5.0)
+# NOVA DAW — Fase 6 (0.6.0)
 
 Aplicativo desktop próprio para Windows em C++20/JUCE. Esta versão implementa
 Edit/Mix, importação WAV mono/estéreo, waveform real, reprodução simultânea,
@@ -10,8 +10,11 @@ por canal/Master, VST3 stereo, cinco efeitos nativos e automação Read.
 A Fase 4 adiciona faixas/clips MIDI, Piano Roll, instrumentos VST3, entrada e
 gravação MIDI, metrônomo e arquivos Standard MIDI File. A Fase 5 adiciona gravação
 WAV multipista, entradas mono/estéreo, punch/roll, loop/takes e recuperação.
-ASIO, bounce de áudio e Write/Touch/Latch continuam pendentes.
+A Fase 6 adiciona fades/crossfades, seleção múltipla, slip/ripple, stretch/pitch
+offline, preview, comping, consolidação e bounce.
+ASIO e Write/Touch/Latch continuam pendentes.
 A Fase 3.5 adiciona PDC e proteção do ciclo de vida/processamento VST3.
+Edição avançada: [docs/phase6-report.md](docs/phase6-report.md).
 Gravação: [docs/phase5-report.md](docs/phase5-report.md).
 Resultados MIDI: [docs/phase4-report.md](docs/phase4-report.md).
 Estabilização: [docs/phase3-stability-report.md](docs/phase3-stability-report.md);
@@ -117,11 +120,13 @@ Em janelas pequenas, use a rolagem da mesa para acessar todos os controles.
 Larguras, zoom, vista Edit/Mix e Snap são restaurados por
 `.nova-preferences.json`, local à pasta deste projeto.
 
-Sessões versão 4 guardam também MIDI/instrumentos/entradas e preservam os dados
-antigos. Versões 1/2/3 continuam legíveis. A versão 3 guardava regiões, mixagem, nomes/cores/alturas, entrada, buses,
+Sessões versão 6 guardam também MIDI/instrumentos, gravação/entradas/takes, fades
+e fontes/resultados de transformações/comping. Versões 1–5 continuam legíveis.
+A versão 3 guardava regiões, mixagem, nomes/cores/alturas, entrada, buses,
 roteamento, inserts, estado opaco VST3, sends, automação, tempo/loop e Master.
 Versões 1/2 continuam legíveis, com valores padrão para os novos recursos.
-A captura do estado de plugins ocorre com o callback desanexado.
+A captura do estado de plugins ocorre com o processamento de áudio suspenso
+durante a operação.
 As referências aos WAV são relativas. Os arquivos
 de áudio não são copiados para a pasta de sessão; preserve os arquivos e sua
 posição relativa ao transportar um projeto. Dados ausentes/inválidos cancelam
@@ -145,14 +150,14 @@ Limites desta fase: 64 faixas, 128 regiões por faixa, timeline de 24 horas e
 512 MiB de WAV decodificado por sessão; somente
 WAV mono/estéreo. Os arquivos são carregados integralmente na memória e a importação
 ocorre na thread da interface, podendo pausá-la com arquivos grandes. Alterações
-estruturais desanexam o callback antes de modificar buffers. Não existe streaming
-de disco nesta versão. Clips importados começam no tempo zero e podem ser movidos.
+estruturais desanexam o callback antes de modificar buffers. Não existe streaming de leitura
+para reprodução; captura e render escrevem em workers de disco. Clips importados começam no tempo zero e podem ser movidos.
 Regiões sobrepostas somam seus sinais.
 
 Mono usa pan de potência constante; estéreo usa balanceamento L/R. Reamostragem
 linear permite arquivos com sample rates diferentes. Overload é mostrado nos
 canais/Master e a saída recebe hard clipping em ±1. Não há limiter de masterização
-ou streaming. PDC alinha faixas/buses/sends/Master e preserva atrasos em bypass.
+ou streaming de reprodução. PDC alinha faixas/buses/sends/Master e preserva atrasos em bypass.
 Limites: 65536 amostras/insert, 262144/caminho e 128 MiB de buffers de arestas.
 A reprodução drena a PDC ao fim das regiões; caudas musicais adicionais de
 delay/reverb após o fim da sessão ainda não são reproduzidas. Performance máxima
@@ -160,10 +165,12 @@ e compatibilidade com plugins externos dependem de validação por máquina.
 
 A saída Realtek foi validada por callback WASAPI com amostras não nulas. A
 audibilidade física não foi medida externamente. ASIO não está habilitado nesta
-fase; gravação e entrada de áudio também não estão implementadas.
+fase. Gravação/entradas foram implementadas na Fase 5 e validadas com sinais
+simulados; hardware multicanal continua pendente.
 
 O modo `--session "arquivo.novadaw"` abre uma sessão ao iniciar. O modo de teste
-`--validate-ui "pasta"` importa os WAV referenciados, exercita gestos de edição,
+`--validate-ui "pasta"` precisa ser combinado com `--session` e uma sessão
+com dois WAVs (por exemplo demo.novadaw de CTest). Importa os WAV referenciados, exercita gestos de edição,
 atalhos, controles, layout, sessões e transporte/loop, salva uma sessão editada,
 snapshots Edit/Mix e um resultado JSON, e encerra o aplicativo. As fixtures
 `build/ninja-debug/test-data/demo.novadaw` são criadas por CTest.
@@ -230,3 +237,35 @@ Input Monitoring vem desligado; habilite explicitamente com fones e evite feedba
 Capturas ficam em `Recordings/Audio` ao lado da sessão (ou na raiz antes de salvar).
 As pastas de captura são fontes da sessão; mantenha-as junto ao projeto.
 Validação automatizada usa entradas simuladas; hardware de gravação não certificado.
+
+## Edição avançada e render (Fase 6)
+
+Selecione clips com Shift/Ctrl-click ou Selector na timeline; Ctrl+A seleciona áudio.
+Use **Editar → Editor de audio / Fades / Comp / Render**. Arraste os pontos da curva
+para mudar fades; escolha Linear, Exponential ou Equal-power. Crossfade requer dois
+clips adjacentes/com handles ou sobrepostos na mesma faixa. Tool Slip desloca a
+janela da fonte; Ripple afeta os clips seguintes. Duplicação e edição têm Undo/Redo.
+
+No editor, configure fator de duração, semitons e cents. **Pre-visualizar audio**
+processa em background e toca o resultado sem alterar o clip; **Aplicar preview**
+ou **Aplicar duracao/pitch** adota o resultado. **Reverter ao original** restaura a
+janela anterior à primeira transformação. O algoritmo é aproximado; artefatos e
+limites estão no relatório. Nenhuma fonte é reescrita.
+
+Selecione um take e intervalo em segundos para **Comp trecho**. **Consolidar clips
+selecionados** renderiza antes do mixer na faixa atual; **Bounce selecao** renderiza
+o mix completo do intervalo selecionado (ou dos clips selecionados), incluindo
+VST3, buses/sends/Read/PDC. Resultados ficam em `Rendered`, sem sobrescrever WAVs.
+Mantenha `.nova-cache`, `Rendered`, `Recordings` e fontes junto ao projeto ao copiar
+sessões. Cancelamento limpa apenas temporários do job; cache usado não é apagado.
+
+Validações opcionais da interface (um processo por vez):
+
+```powershell
+& '.\build\ninja-release\NovaDAW_artefacts\Release\NOVA DAW.exe' --validate-advanced-ui "$PWD\build\ui-validation-phase6-release"
+& '.\build\ninja-release\NovaDAW_artefacts\Release\NOVA DAW.exe' --validate-recording-ui "$PWD\build\ui-validation-phase5-release"
+& '.\build\ninja-release\NovaDAW_artefacts\Release\NOVA DAW.exe' --validate-midi-ui "$PWD\build\ui-validation-phase4-release"
+```
+
+Esses modos criam fixtures/sessões e `ui-result.json` nos diretórios indicados e
+fecham o aplicativo. Não validam gravação física ou plugins de terceiros.

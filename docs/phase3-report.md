@@ -195,3 +195,11 @@ manual estão em [phase3-stability-report.md](phase3-stability-report.md).
 A compatibilidade com terceiros permanece pendente e, por instrução do
 usuário, não bloqueia as Fases 4, 5 e 6. Os demais recursos futuros listados
 na entrega original não foram implementados nesta estabilização.
+
+## Continuidade das fases seguintes
+
+O histórico da Fase 3 permanece acima. As Fases 4, 5 e 6 foram implementadas no
+mesmo workspace, com relatórios phase4/5/6-report.md, sessão v6 compatível com 1–5,
+builds Debug/Release e regressão CTest 12/12 (503 verificações + dois smoke tests).
+MIDI/VST3i, captura WAV e edição/offline preservam mixer/PDC/Read. Pendências de
+hardware/terceiros e limitações de tempo real permanecem explícitas nos relatórios.

@@ -54,7 +54,7 @@ uint64_t AudioRecorder::overflowCount()const noexcept{return impl?impl->overflow
 juce::File AudioRecorder::captureDirectory()const{return impl?impl->folder:juce::File{};}
 juce::String AudioRecorder::status()const{return isActive()?"Gravando WAV; "+juce::String(impl->written.load())+" samples":lastStatus;}
 bool AudioRecorder::start(const juce::File& destination,int availableInputs,const RecordingOptions& options,juce::String& error){
-    if(impl&&impl->worker.joinable()){error="Finalize a gravacao anterior.";return false;}
+    error.clear();if(impl&&impl->worker.joinable()){error="Finalize a gravacao anterior.";return false;}
     if(!std::isfinite(options.punchIn)||!std::isfinite(options.punchOut)||!std::isfinite(options.preRoll)||!std::isfinite(options.postRoll)||!std::isfinite(options.loopStart)||!std::isfinite(options.loopEnd)
         ||options.punchIn<0||options.punchOut>86400||options.punchOut<=options.punchIn||options.preRoll<0||options.preRoll>60||options.postRoll<0||options.postRoll>60||options.loopStart<0||options.loopEnd<=options.loopStart||options.loopEnd>86400){error="Intervalos de gravacao invalidos.";return false;}
     AudioEngine::MutationGuard guard(engine);auto next=std::make_unique<Impl>(engine);next->rate=engine.sampleRate();next->generation=engine.midiGeneration();next->options=options;next->group=engine.newRegionId();
@@ -85,7 +85,7 @@ void AudioRecorder::capture(const float* const* input,int channels,int frames,do
     for(auto& lane:state.lanes)state.flush(*lane);
 }
 bool AudioRecorder::stop(juce::String& error){
-    if(!impl||!impl->worker.joinable())return true;AudioEngine::MutationGuard guard(engine);impl->active=false;engine.audioRecording=false;for(auto& lane:impl->lanes)impl->flush(*lane);impl->stop=true;impl->worker.join();engine.recordingExtent=0;
+    error.clear();if(!impl||!impl->worker.joinable())return true;AudioEngine::MutationGuard guard(engine);impl->active=false;engine.audioRecording=false;for(auto& lane:impl->lanes)impl->flush(*lane);impl->stop=true;impl->worker.join();engine.recordingExtent=0;
     bool ok=impl->error.load()==none;const bool same=impl->generation==engine.midiGeneration();
     for(auto& lane:impl->lanes)if(same&&lane->track<engine.trackCount()){auto& track=engine.track(lane->track);uint64_t last=0;
         for(auto take:lane->files)if(take.length>0){if(track.takes.size()>=128){ok=false;continue;}take.id=engine.newRegionId();last=take.id;track.takes.push_back(std::move(take));}
@@ -96,7 +96,7 @@ bool AudioRecorder::stop(juce::String& error){
 }
 void AudioRecorder::service(){if(impl&&impl->worker.joinable()&&(!impl->active||!engine.audioRecording||!engine.isPlaying()||impl->generation!=engine.midiGeneration())){juce::String error;stop(error);}}
 bool AudioRecorder::recover(const juce::File& directory,juce::String& error){
-    if(isActive()){error="Pare a gravacao antes de recuperar takes.";return false;}const auto manifest=directory.getChildFile("recovery.json");if(manifest.getSize()>1024*1024){error="Manifesto de captura excede limite.";return false;}
+    error.clear();if(isActive()){error="Pare a gravacao antes de recuperar takes.";return false;}if(impl&&impl->worker.joinable()){juce::String finishError;stop(finishError);}const auto manifest=directory.getChildFile("recovery.json");if(manifest.getSize()>1024*1024){error="Manifesto de captura excede limite.";return false;}
     const auto data=juce::JSON::parse(manifest.loadFileAsString());if(!data.isObject()||data["format"].toString()!="nova-recording-recovery"||!data["files"].isArray()||data["files"].size()>4096){error="Pasta de captura invalida.";return false;}
     struct Pending {int track;Track::Take take;};std::vector<Pending> pending;
     for(const auto& item:*data["files"].getArray()){

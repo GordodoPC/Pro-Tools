@@ -110,3 +110,6 @@ entrada MIDI física não foi testada, e nenhum módulo de terceiros foi instala
 
 Continuidade: gravação de áudio/sessão v5 implementada e validada na Fase 5;
 ver [phase5-report.md](phase5-report.md) para limites e evidências.
+
+Regressão completa em 0.6.0: CTest Debug/Release 12/12; sessão v6 preserva MIDI,
+instrumento e presets. MIDI físico/terceiros continuam não validados.
