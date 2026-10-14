@@ -168,7 +168,7 @@ void Ruler::mouseDown(const juce::MouseEvent& e){engine.seek(editor.quantize((e.
 Mixer::Mixer(AudioEngine& e,EditModel& ed,ApplyEdit a):engine(e),editor(ed),apply(a),catalog(juce::File(NOVA_PROJECT_ROOT).getChildFile(".nova-plugin-list.xml")){
     for(auto* c:std::initializer_list<juce::Component*>{&addAux,&addMono,&scan,&scanFolder,&plugins,&scanStatus})addAndMakeVisible(c);
     addAux.onClick=[this]{if(onAddAux)onAddAux(false);};addMono.onClick=[this]{if(onAddAux)onAddAux(true);};
-    scan.onClick=[this]{juce::VST3PluginFormat format;catalog.scan(format.getDefaultLocationsToSearch());};
+    scan.onClick=[this]{catalog.scanConfigured();};
     scanFolder.onClick=[this]{if(onScanFolder)onScanFolder();};plugins.onClick=[this]{pluginManager=createPluginManager(catalog);};
 }
 void Mixer::rebuild(std::function<void()> changed){controls.clear();for(int i=0;i<=engine.trackCount();++i){auto c=std::make_unique<ChannelStrip>(engine,editor,i==engine.trackCount()?-1:i,catalog,apply,changed);addAndMakeVisible(*c);controls.push_back(std::move(c));}layoutChannels(getHeight());}

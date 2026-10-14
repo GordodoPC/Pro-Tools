@@ -75,6 +75,7 @@ public:
     void closeEditors();
     bool validatePhase3Bindings();
     void scanPlugins(const juce::FileSearchPath& paths){catalog.scan(paths);}
+    void addPluginDirectory(const juce::File& path){if(catalog.addDirectory(path))catalog.scanConfigured();}
     std::function<void(bool)> onAddAux;
     std::function<void()> onScanFolder;
 private:

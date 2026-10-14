@@ -32,7 +32,7 @@ MainComponent::MainComponent()
     mixView.setViewedComponent(&mixer, false);
     mixer.onAddAux=[this](bool mono){juce::String error;bool ok=false;audio.editStructure([&]{ok=audio.engine.addAux("Aux "+juce::String(audio.engine.trackCount()+1),mono,error);});if(!ok)showError(error);else{dirty=true;editor.reset();refreshTracks();}};
     mixer.onScanFolder=[this]{chooser=std::make_unique<juce::FileChooser>("Pasta de plugins VST3",juce::File{});chooser->launchAsync(juce::FileBrowserComponent::openMode|juce::FileBrowserComponent::canSelectDirectories,
-        [safe=juce::Component::SafePointer<MainComponent>(this)](const auto& c){if(safe && c.getResult().isDirectory())safe->mixer.scanPlugins(juce::FileSearchPath(c.getResult().getFullPathName()));});};
+        [safe=juce::Component::SafePointer<MainComponent>(this)](const auto& c){if(safe && c.getResult().isDirectory())safe->mixer.addPluginDirectory(c.getResult());});};
     trackView.setScrollBarsShown(false, false);
     editView.onScroll = [this](auto area) {
         trackView.setViewPosition(0, area.getY()); ruler.scrollX = area.getX(); ruler.repaint();

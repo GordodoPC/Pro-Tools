@@ -21,7 +21,7 @@ public:
 private:
     PluginCatalog& catalog;juce::Array<juce::PluginDescription> types;juce::ComboBox list;juce::TextEditor details;juce::TextButton remove{"Remover da lista"},clear{"Limpar registro de falhas"};
     void refreshList(){types=catalog.known.getTypes();const int selected=list.getSelectedId();list.clear();for(int i=0;i<types.size();++i)list.addItem(types[i].name,i+1);if(!types.isEmpty())list.setSelectedId(std::clamp(selected,1,types.size()),juce::dontSendNotification);updateDetails();}
-    void updateDetails(){juce::String text=catalog.status()+"\n";const int i=list.getSelectedId()-1;if(i>=0&&i<types.size()){const auto& p=types[i];text+=p.name+"\n"+p.manufacturerName+" "+p.version+"\n"+p.fileOrIdentifier+"\n";}
+    void updateDetails(){juce::String text=catalog.status()+"\nPastas de busca:\n"+catalog.configuredLocations().toString()+"\n\n";const int i=list.getSelectedId()-1;if(i>=0&&i<types.size()){const auto& p=types[i];text+=p.name+"\n"+p.manufacturerName+" "+p.version+"\n"+p.fileOrIdentifier+"\n";}
         text+="\nModulos com falha:\n"+catalog.known.getBlacklistedFiles().joinIntoString("\n");details.setText(text);remove.setEnabled(i>=0&&!catalog.scanning());clear.setEnabled(!catalog.scanning());}
     void timerCallback()override{if(types.size()!=catalog.known.getNumTypes())refreshList();else updateDetails();}
 };
@@ -148,7 +148,7 @@ void ChannelStrip::insertMenu(int slot){
     const auto types=catalog.known.getTypes();if(!types.isEmpty()){juce::PopupMenu vst;for(int i=0;i<types.size();++i)vst.addItem(100+i,types[i].name);menu.addSubMenu("VST3",vst);}
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&inserts[slot]),[safe=juce::Component::SafePointer<ChannelStrip>(this),slot,types](int id){
         if(!safe || !id)return;auto& p=safe->chain()[slot];
-        if(id==1 && p){if(p->kind==EffectKind::vst3){if(p->plugin)p->openEditor();else safe->showError(p->failure);}
+        if(id==1 && p){if(p->kind==EffectKind::vst3){if(p->plugin){AudioEngine::MutationGuard guard(safe->engine);p->openEditor();}else safe->showError(p->failure);}
             else{safe->closeEditors();safe->toolWindow=std::make_unique<ToolWindow>(new EffectPanel(*p,safe->changed,safe->engine.sampleRate()),p->name());}return;}
         if(id==2 && p){p->bypass=!p->bypass.load();safe->changed();safe->refresh();return;}
         safe->closeEditors();

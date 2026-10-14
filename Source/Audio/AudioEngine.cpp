@@ -123,6 +123,8 @@ void AudioEngine::setSmoothingTime(double seconds) {
 }
 void AudioEngine::setOutputRate(double rate) {
     MutationGuard mutation(*this);
+    // Preserve the unwrapped automation clock when its sample unit changes.
+    seekOrigin+=elapsedSinceSeek/outputRate.load();elapsedSinceSeek=0;
     outputRate=std::isfinite(rate)&&rate>=100?rate:44100;requestedDeviceRate=outputRate.load();setSmoothingTime(smoothingTime);prepareProcessors();
 }
 void AudioEngine::prepareProcessors() {
@@ -142,7 +144,7 @@ uint64_t AudioEngine::contentionDropouts()const {
     uint64_t total=0;for(int i=0;i<count;++i)for(const auto& insert:track(i).inserts)if(insert)total+=insert->contentionDropouts();
     for(const auto& insert:masterInserts)if(insert)total+=insert->contentionDropouts();return total;
 }
-void AudioEngine::closeEditors(){for(int i=0;i<count;++i)for(auto& p:track(i).inserts)if(p)p->closeEditor();for(auto& p:masterInserts)if(p)p->closeEditor();}
+void AudioEngine::closeEditors(){MutationGuard mutation(*this);for(int i=0;i<count;++i)for(auto& p:track(i).inserts)if(p)p->closeEditor();for(auto& p:masterInserts)if(p)p->closeEditor();}
 void AudioEngine::replaceSession(AudioEngine& other) {
     MutationGuard mutation(*this);
     clear();

@@ -52,7 +52,7 @@ gerenciador VST3, proteção de tamanho de metadados e validação da interface.
 - Sessões versão 3, migração 1/2, validação antes da troca e escrita temporária.
   Estado de plugins capturado na thread da interface com callback desanexado.
 
-## Funcionalidades parciais e limites
+## Funcionalidades parciais e limites na entrega original
 
 **Esta entrega não certifica a Fase 3 completa.** A garantia estrita de tempo real
 da cadeia VST3 e a compatibilidade com plugins externos ainda não foram verificadas.
@@ -83,7 +83,7 @@ da cadeia VST3 e a compatibilidade com plugins externos ainda não foram verific
 - Sem benchmark/certificação de carga máxima, latência roundtrip ou teste de horas.
   Importação WAV e carregamento de plugins continuam síncronos na interface.
 
-## Testes automatizados
+## Testes automatizados da Fase 3
 
 Resultados finais: build Ninja x64 **Debug e Release aprovados**, CTest **5/5**
 em cada configuração. AudioAndSessions: **97** verificações; MixerRouting:
@@ -146,7 +146,7 @@ alocação são evidência do caminho exercitado, não prova para plugins de ter
 5. Injetar access violation/timeout de módulos externos. Falha de processo e retry
    já têm teste automatizado com a fixture própria; timeout não foi exercitado.
 
-## Não implementado
+## Não implementado na entrega original
 
 Write/Touch/Latch, automação gráfica/Master/sends, compensação de latência,
 playhead VST3 para tempo-sync, instrumentos/MIDI/sidechains, gravação/Record Arm,
@@ -175,3 +175,23 @@ e [KnownPluginList](https://docs.juce.com/master/classjuce_1_1KnownPluginList.ht
 
 REA não foi utilizado: a investigação necessária era do código-fonte público
 do projeto/JUCE, sem necessidade de engenharia reversa de artefatos proprietários.
+
+## Atualização: estabilização Fase 3.5
+
+A Fase 3.5 substitui as limitações históricas acima quanto a PDC e às esperas
+identificadas no wrapper. Implementados alinhamento de faixas/buses/Master e
+sends pré/pós, sinal seco compensado em bypass/suspensão/plugin ausente,
+automação considerando a origem do áudio atrasado e drenagem da latência
+no fim das regiões. Sessões continuam na versão 3, com latência opcional.
+
+O host usa tentativa única de aquisição com silêncio/contador em contenção,
+filas atômicas para notificações e preparação/reconstrução fora do render.
+Mutações estruturais esperam o render terminar na thread de controle antes
+de trocar/destruir objetos. Diretórios VST3 adicionais são persistentes e
+somados aos diretórios padrão; nenhum plugin externo foi instalado.
+
+Os resultados atuais, testes prolongados, limites de tempo real e roteiro
+manual estão em [phase3-stability-report.md](phase3-stability-report.md).
+A compatibilidade com terceiros permanece pendente e, por instrução do
+usuário, não bloqueia as Fases 4, 5 e 6. Os demais recursos futuros listados
+na entrega original não foram implementados nesta estabilização.

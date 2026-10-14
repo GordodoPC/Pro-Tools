@@ -9,6 +9,9 @@ public:
     ~PluginCatalog() override;
     juce::KnownPluginList known;
     void scan(const juce::FileSearchPath&);
+    bool addDirectory(const juce::File&);
+    juce::FileSearchPath configuredLocations() const;
+    void scanConfigured() { scan(configuredLocations()); }
     void remove(const juce::PluginDescription&);
     void clearBlacklist();
     juce::String status() const { return scanStatus; }
@@ -17,6 +20,7 @@ public:
 private:
     juce::File cacheFile, resultFile, currentFile;
     juce::StringArray pending;
+    juce::StringArray customDirectories;
     juce::ChildProcess child;
     bool active = false, childActive = false;
     double deadline = 0;

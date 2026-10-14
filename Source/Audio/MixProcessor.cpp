@@ -90,7 +90,9 @@ void MixProcessor::process(juce::AudioBuffer<float>& buffer,int frames)noexcept 
     for(int s=0;s<frames;++s){const auto delayed=dryCompensation.process(l[s],r[s]);dry[0][s]=delayed[0];dry[1][s]=delayed[1];}
     wet.setTargetValue(bypass.load() || faulted.load() || (kind==EffectKind::vst3 && !plugin) ? 0.0f:1.0f);
     if(kind==EffectKind::vst3){
-        if(plugin && !faulted.load() && !plugin->isSuspended()){
+        const bool suspended=plugin && plugin->isSuspended();
+        if(suspended)wet.setCurrentAndTargetValue(0.0f);
+        if(plugin && !faulted.load() && !suspended){
             // A view into preallocated stereo memory; two channels fit JUCE's inline pointer array.
             float* pointers[]{l,r};juce::AudioBuffer<float> view(pointers,2,frames);midi.clear();
             try{plugin->processBlock(view,midi);}catch(...){bypass=true;faulted=true;wet.setCurrentAndTargetValue(0);}

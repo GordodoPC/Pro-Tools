@@ -61,7 +61,8 @@ public:
     static constexpr int64_t maxSessionBytes = 512LL * 1024 * 1024;
     static constexpr int maxRegionsPerTrack = 128;
     static std::unique_ptr<Clip> loadWav(const juce::File&, juce::String& error);
-    // Structural operations must run with the hardware callback detached.
+    // Structural entry points acquire MutationGuard. Direct edits of public
+    // tracks, inserts and automation require a guard on the same control thread.
     bool addClip(std::unique_ptr<Clip>, juce::String& error);
     bool addSharedClip(std::shared_ptr<Clip>, juce::String& error);
     void recalculateMediaBytes();

@@ -1,4 +1,4 @@
-# NOVA DAW — Fase 3 (0.3.0)
+# NOVA DAW — Fase 3.5 (0.3.0)
 
 Aplicativo desktop próprio para Windows em C++20/JUCE. Esta versão implementa
 Edit/Mix, importação WAV mono/estéreo, waveform real, reprodução simultânea,
@@ -8,7 +8,9 @@ grade musical, painéis redimensionáveis, preferências e saída Master stereo/
 A versão 0.3.0 adiciona buses stereo/mono, sends pré/pós-fader, quatro inserts
 por canal/Master, VST3 stereo, cinco efeitos nativos e automação Read.
 Gravação, MIDI, ASIO, exportação e Write/Touch/Latch continuam pendentes.
-Resultados e limites: [docs/phase3-report.md](docs/phase3-report.md).
+A Fase 3.5 adiciona PDC e proteção do ciclo de vida/processamento VST3.
+Resultados atuais: [docs/phase3-stability-report.md](docs/phase3-stability-report.md);
+histórico: [docs/phase3-report.md](docs/phase3-report.md).
 
 ## Compilar no Windows
 
@@ -20,6 +22,8 @@ O JUCE é fixado em 9.0.4 pelo arquivo `dependencies.json`. Para repor uma cópi
 ausente, execute `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap.ps1`
 (faz download do repositório oficial; a política é limitada ao processo).
 O script não substitui uma dependência existente com commit diferente.
+CMake aplica as adaptações de tempo real em `patches/juce-9.0.4/realtime.json`,
+verifica hashes de todos os arquivos e recusa fontes desconhecidas.
 
 No PowerShell, dentro desta pasta:
 
@@ -78,15 +82,16 @@ seleção de destino, pré/pós-fader e nível em dB. A entrada das faixas vem d
 timeline e a dos buses vem das conexões. Record Arm ainda não tem suporte.
 
 Os quatro slots de insert oferecem NOVA EQ, Compressor, Gate, Delay e Reverb,
-editor, bypass e remoção. **Scan VST3** pesquisa os locais padrão do JUCE;
-**Pasta VST3** permite um diretório adicional. Para experimentar o VST3 próprio
+editor, bypass e remoção. **Scan VST3** pesquisa os locais padrão do Windows
+e os diretórios adicionais salvos. **Pasta VST3** adiciona um diretório
+persistente; **Plugins** mostra os caminhos configurados. Para experimentar o VST3 próprio
 de teste, selecione `build/ninja-debug/NovaTestGain_artefacts/Debug/VST3`.
 A lista aparece no submenu VST3 dos inserts. O scanner usa processos filhos,
 com timeout de 20 segundos por módulo. Conserve `NovaPluginScanner.exe` ao lado
 de `NOVA DAW.exe`. Lista e blacklist são guardadas em `.nova-plugin-list.xml`;
 uma nova varredura tenta novamente os módulos. Somente efeitos com um bus
 stereo de entrada/saída são aceitos. Plugins não encontrados preservam
-slot/estado, deixam o sinal passar e mostram `[ausente]`.
+slot/estado, deixam o sinal seco passar com o último atraso conhecido e mostram `[ausente]`.
 **Plugins** exibe fabricante, versão, caminho e blacklist; permite remover
 descrições da lista ou limpar falhas. Isso preserva os módulos instalados e
 os inserts já carregados na sessão.
@@ -122,8 +127,9 @@ antes de descartar alterações não salvas.
 
 - `Source/Audio`: buffers, waveform e mixer com callback sem operações de disco,
   mutexes próprios ou alocações deliberadas; controles atômicos lock-free no alvo x64.
-  O wrapper VST3 do JUCE possui spinlock interno; plugins externos também podem
-  alocar/bloquear. A cadeia VST3 não tem garantia estrita de ausência de locks.
+  O wrapper VST3 usa try-lock sem esperar, com silêncio/contador em contenção.
+  Plugins externos podem alocar/bloquear/falhar dentro de seu próprio código;
+  os testes com a fixture própria não certificam segurança de terceiros.
 - `Source/Session`: validação/persistência JSON, preferências e histórico de edição.
 - `Source/UI`: timeline, mesa e controles vinculados ao motor.
 - `Source/App`: janela desktop e ciclo de vida JUCE.
@@ -139,9 +145,11 @@ Regiões sobrepostas somam seus sinais.
 
 Mono usa pan de potência constante; estéreo usa balanceamento L/R. Reamostragem
 linear permite arquivos com sample rates diferentes. Overload é mostrado nos
-canais/Master e a saída recebe hard clipping em ±1. Não há limiter de masterização,
-compensação de latência de plugins ou streaming. A reprodução termina ao fim das
-regiões; caudas após o fim da sessão ainda não são reproduzidas. Performance máxima
+canais/Master e a saída recebe hard clipping em ±1. Não há limiter de masterização
+ou streaming. PDC alinha faixas/buses/sends/Master e preserva atrasos em bypass.
+Limites: 65536 amostras/insert, 262144/caminho e 128 MiB de buffers de arestas.
+A reprodução drena a PDC ao fim das regiões; caudas musicais adicionais de
+delay/reverb após o fim da sessão ainda não são reproduzidas. Performance máxima
 e compatibilidade com plugins externos dependem de validação por máquina.
 
 A saída Realtek foi validada por callback WASAPI com amostras não nulas. A
@@ -153,10 +161,28 @@ O modo `--session "arquivo.novadaw"` abre uma sessão ao iniciar. O modo de test
 atalhos, controles, layout, sessões e transporte/loop, salva uma sessão editada,
 snapshots Edit/Mix e um resultado JSON, e encerra o aplicativo. As fixtures
 `build/ninja-debug/test-data/demo.novadaw` são criadas por CTest.
-Resultados históricos: `docs/phase2-report.md`; atuais: `docs/phase3-report.md`.
+Resultados históricos: `docs/phase2-report.md`, `docs/phase3-report.md`;
+atuais: `docs/phase3-stability-report.md`.
 
 O JUCE conserva sua licença AGPLv3/comercial em `external/JUCE/LICENSE.md`.
 A modalidade apropriada para distribuição do produto ainda deve ser definida.
 
 REA: diagnóstico e limitações em `docs/research/rea-status.md`. Nenhuma análise
 de binários proprietários foi feita; Ghidra e IDA não foram instalados.
+
+## Teste prolongado automatizado
+
+CTest inclui uma reprodução de 10 segundos, concorrência e ciclos VST3.
+Para executar 5 minutos com 32 faixas, 3 buses/returns, 10 instâncias do
+VST3 próprio, cinco DSPs, Read, mudanças de parâmetros/rate/buffer e sessões:
+
+```powershell
+$taskRoot = (Get-Location).Path
+$taskPlugin = Join-Path $taskRoot 'build/ninja-release/NovaTestGain_artefacts/Release/VST3/NOVA Test Gain.vst3/Contents/x86_64-win/NOVA Test Gain.vst3'
+& './build/ninja-release/NovaStabilityTests_artefacts/Release/NovaStabilityTests.exe' (Join-Path $taskRoot 'build/stability-manual-run') $taskPlugin 300
+```
+
+O argumento aceita 10..3600 segundos. `stability-result.json` registra CPU,
+memória privada, duração do render, violações de prazo, alocações observadas
+e erros de controle. Esse teste usa um render agendado, sem dispositivo de
+áudio; audição física, ASIO, roundtrip e VST3 de terceiros exigem validação própria.
