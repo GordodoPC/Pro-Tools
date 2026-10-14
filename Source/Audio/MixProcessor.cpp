@@ -54,18 +54,22 @@ juce::String MixProcessor::name()const {
     case EffectKind::vst3:return description.name+(faulted?" [falha]":plugin ? "":" [ausente]");}return {};
 }
 void MixProcessor::prepare(double rate){
-    sampleRate=rate;
+    if(prepared && sampleRate==rate && !latencyChanged())return;
+    prepared=false;sampleRate=rate;
     for(int i=0;i<std::min(parameterCount(),24);++i){smoothed[i].reset(rate,0.02);smoothed[i].setCurrentAndTargetValue(parameter(i));}
-    wet.reset(rate,0.005);wet.setCurrentAndTargetValue(bypass ? 0.0f:1.0f);
+    wet.reset(rate,0.005);wet.setCurrentAndTargetValue(bypass.load() || faulted.load() || (kind==EffectKind::vst3 && !plugin) ? 0.0f:1.0f);
     if(kind==EffectKind::delay){delayBuffer.setSize(2,static_cast<int>(rate*2)+mixBlockSize+2);delayBuffer.clear();delayGeneration.assign(static_cast<size_t>(delayBuffer.getNumSamples()),0);currentDelayGeneration=1;}
     reverberator.setSampleRate(rate);
     if(plugin){plugin->releaseResources();plugin->setRateAndBufferSizeDetails(rate,mixBlockSize);plugin->prepareToPlay(rate,mixBlockSize);}
-    reset();
+    const int reported=plugin?plugin->getLatencySamples():missingLatency;
+    if(reported<0 || reported>maximumInsertLatency){failure="Latencia do insert excede 65536 amostras.";faulted=true;bypass=true;preparedLatency=0;}
+    else preparedLatency=reported;
+    dryCompensation.prepare(preparedLatency);reset();prepared=true;
 }
 void MixProcessor::reset(bool resetPlugin){filterState={};envelope=gateGain=0;holdSamples=delayWrite=0;
     // Invalidate delay cells in O(1) on seek; do not clear seconds of memory in the callback.
     if(++currentDelayGeneration==0){std::fill(delayGeneration.begin(),delayGeneration.end(),0);currentDelayGeneration=1;}
-    reverberator.reset();if(plugin && resetPlugin)plugin->reset();}
+    dryCompensation.reset();reverberator.reset();if(plugin && resetPlugin)plugin->reset();}
 namespace {
 std::array<std::array<float,6>,7> eqCoefficients(const std::array<float,24>& p,double rate){
     std::array<std::array<float,6>,7> coefficients{};
@@ -83,8 +87,8 @@ void MixProcessor::updateEq(const std::array<float,24>& p,double rate){coefficie
 void MixProcessor::process(juce::AudioBuffer<float>& buffer,int frames)noexcept {
     if(frames<1 || frames>mixBlockSize || buffer.getNumChannels()<2 || buffer.getNumSamples()<frames)return;
     auto* l=buffer.getWritePointer(0);auto* r=buffer.getWritePointer(1);
-    for(int c=0;c<2;++c)std::copy_n(buffer.getReadPointer(c),frames,dry[c].data());
-    wet.setTargetValue(bypass.load() ? 0.0f:1.0f);
+    for(int s=0;s<frames;++s){const auto delayed=dryCompensation.process(l[s],r[s]);dry[0][s]=delayed[0];dry[1][s]=delayed[1];}
+    wet.setTargetValue(bypass.load() || faulted.load() || (kind==EffectKind::vst3 && !plugin) ? 0.0f:1.0f);
     if(kind==EffectKind::vst3){
         if(plugin && !faulted.load() && !plugin->isSuspended()){
             // A view into preallocated stereo memory; two channels fit JUCE's inline pointer array.
@@ -147,7 +151,7 @@ double MixProcessor::magnitude(double frequency,double rate)const {
 }
 juce::var MixProcessor::state()const {
     auto o=std::make_unique<juce::DynamicObject>();o->setProperty("kind",static_cast<int>(kind));o->setProperty("bypass",bypass.load());
-    juce::Array<juce::var> values;for(int i=0;i<parameterCount() && kind!=EffectKind::vst3;++i)values.add(parameter(i));o->setProperty("parameters",values);
+    juce::Array<juce::var> values;for(int i=0;i<parameterCount() && kind!=EffectKind::vst3;++i)values.add(parameter(i));o->setProperty("parameters",values);o->setProperty("latencySamples",preparedLatency);
     if(kind==EffectKind::vst3){auto xml=description.createXml();o->setProperty("description",xml->toString());juce::MemoryBlock memory=savedState;
         if(plugin)plugin->getStateInformation(memory);o->setProperty("state",memory.toBase64Encoding());}
     return juce::var(o.release());
@@ -156,6 +160,10 @@ std::unique_ptr<MixProcessor> MixProcessor::restore(const juce::var& v,double ra
     if(!v.isObject() || !v["kind"].isInt() || int(v["kind"])<0 || int(v["kind"])>5 || !v["bypass"].isBool() || !v["parameters"].isArray()){
         error="Insert invalido.";return {};}
     auto p=std::make_unique<MixProcessor>(static_cast<EffectKind>(int(v["kind"])));p->bypass=bool(v["bypass"]);
+    if(!v["latencySamples"].isVoid()){
+        if(!v["latencySamples"].isInt() || int(v["latencySamples"])<0 || int(v["latencySamples"])>maximumInsertLatency){error="Latencia persistida do insert invalida.";return {};}
+        if(p->kind==EffectKind::vst3)p->missingLatency=int(v["latencySamples"]);
+    }
     if(p->kind==EffectKind::vst3){
         auto xml=juce::parseXML(v["description"].toString());
         if(!xml || !p->description.loadFromXml(*xml) || p->description.pluginFormatName!="VST3"
@@ -178,6 +186,8 @@ std::unique_ptr<MixProcessor> MixProcessor::restore(const juce::var& v,double ra
     }
     p->prepare(rate);return p;
 }
+bool MixProcessor::latencyChanged()const noexcept{return plugin && !faulted.load() && plugin->getLatencySamples()!=preparedLatency;}
+uint64_t MixProcessor::contentionDropouts()const noexcept{return plugin?plugin->getNonBlockingDropoutCount():0;}
 void MixProcessor::openEditor(){if(!plugin)return;if(!editorWindow){auto* editor=plugin->createEditorIfNeeded();if(!editor)editor=new juce::GenericAudioProcessorEditor(*plugin);editorWindow=std::make_unique<EditorWindow>(editor,name());}editorWindow->setVisible(true);editorWindow->toFront(true);}
 void MixProcessor::closeEditor(){editorWindow.reset();}
 float AutomationLane::evaluate(double time,float fallback)const noexcept {

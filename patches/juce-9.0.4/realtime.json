@@ -1,0 +1,114 @@
+[
+  {
+    "path": "format_types/juce_VST3PluginFormatImpl.h",
+    "original": "3a009ce8ec595b96480f095ac75ef44460106bbb34eb07b8512c985bea3e2d94",
+    "patched": "807b9c8bb5d2ae5f73cfe8185e18ef6993f17192e43d467eb28ac1a7ec7ebb64",
+    "replacements": [
+      {
+        "before": "    void processBlock (AudioBuffer<float>& buffer, MidiBuffer& midiMessages) override\n    {\n        jassert (! isUsingDoublePrecision());\n\n        const SpinLock::ScopedLockType processLock (processMutex);\n\n        if (isActive && processor != nullptr)\n            processAudio (buffer, midiMessages, Vst::kSample32, false);\n    }\n\n    void processBlock (AudioBuffer<double>& buffer, MidiBuffer& midiMessages) override\n    {\n        jassert (isUsingDoublePrecision());\n\n        const SpinLock::ScopedLockType processLock (processMutex);\n\n        if (isActive && processor != nullptr)\n            processAudio (buffer, midiMessages, Vst::kSample64, false);\n    }\n\n    void processBlockBypassed (AudioBuffer<float>& buffer, MidiBuffer& midiMessages) override\n    {\n        jassert (! isUsingDoublePrecision());\n\n        const SpinLock::ScopedLockType processLock (processMutex);\n\n        if (bypassParam != nullptr)\n        {\n            if (isActive && processor != nullptr)\n                processAudio (buffer, midiMessages, Vst::kSample32, true);\n        }\n        else\n        {\n            AudioProcessor::processBlockBypassed (buffer, midiMessages);\n        }\n    }\n\n    void processBlockBypassed (AudioBuffer<double>& buffer, MidiBuffer& midiMessages) override\n    {\n        jassert (isUsingDoublePrecision());\n\n        const SpinLock::ScopedLockType processLock (processMutex);\n\n        if (bypassParam != nullptr)\n        {\n            if (isActive && processor != nullptr)\n                processAudio (buffer, midiMessages, Vst::kSample64, true);\n        }\n        else\n        {\n            AudioProcessor::processBlockBypassed (buffer, midiMessages);\n        }\n    }\n\n    //==============================================================================\n",
+        "after": "    void processBlock (AudioBuffer<float>& buffer, MidiBuffer& midiMessages) override\n    {\n        jassert (! isUsingDoublePrecision());\n\n       #if NOVA_VST3_RT_GUARD\n        const SpinLock::ScopedTryLockType processLock (processMutex);\n        if (! processLock.isLocked())\n        {\n            novaContendedBlocks.fetch_add (1, std::memory_order_relaxed);\n            buffer.clear();\n            return;\n        }\n       #else\n        const SpinLock::ScopedLockType processLock (processMutex);\n       #endif\n\n        if (isActive && processor != nullptr)\n            processAudio (buffer, midiMessages, Vst::kSample32, false);\n    }\n\n    void processBlock (AudioBuffer<double>& buffer, MidiBuffer& midiMessages) override\n    {\n        jassert (isUsingDoublePrecision());\n\n       #if NOVA_VST3_RT_GUARD\n        const SpinLock::ScopedTryLockType processLock (processMutex);\n        if (! processLock.isLocked())\n        {\n            novaContendedBlocks.fetch_add (1, std::memory_order_relaxed);\n            buffer.clear();\n            return;\n        }\n       #else\n        const SpinLock::ScopedLockType processLock (processMutex);\n       #endif\n\n        if (isActive && processor != nullptr)\n            processAudio (buffer, midiMessages, Vst::kSample64, false);\n    }\n\n    void processBlockBypassed (AudioBuffer<float>& buffer, MidiBuffer& midiMessages) override\n    {\n        jassert (! isUsingDoublePrecision());\n\n       #if NOVA_VST3_RT_GUARD\n        const SpinLock::ScopedTryLockType processLock (processMutex);\n        if (! processLock.isLocked())\n        {\n            novaContendedBlocks.fetch_add (1, std::memory_order_relaxed);\n            buffer.clear();\n            return;\n        }\n       #else\n        const SpinLock::ScopedLockType processLock (processMutex);\n       #endif\n\n        if (bypassParam != nullptr)\n        {\n            if (isActive && processor != nullptr)\n                processAudio (buffer, midiMessages, Vst::kSample32, true);\n        }\n        else\n        {\n            AudioProcessor::processBlockBypassed (buffer, midiMessages);\n        }\n    }\n\n    void processBlockBypassed (AudioBuffer<double>& buffer, MidiBuffer& midiMessages) override\n    {\n        jassert (isUsingDoublePrecision());\n\n       #if NOVA_VST3_RT_GUARD\n        const SpinLock::ScopedTryLockType processLock (processMutex);\n        if (! processLock.isLocked())\n        {\n            novaContendedBlocks.fetch_add (1, std::memory_order_relaxed);\n            buffer.clear();\n            return;\n        }\n       #else\n        const SpinLock::ScopedLockType processLock (processMutex);\n       #endif\n\n        if (bypassParam != nullptr)\n        {\n            if (isActive && processor != nullptr)\n                processAudio (buffer, midiMessages, Vst::kSample64, true);\n        }\n        else\n        {\n            AudioProcessor::processBlockBypassed (buffer, midiMessages);\n        }\n    }\n\n    //==============================================================================\n"
+      },
+      {
+        "before": "    void start (Vst::IEditController& controllerIn)",
+        "after": "    void start (Vst::IEditController& controllerIn, std::function<void (Steinberg::int32, float)> callback = {})"
+      },
+      {
+        "before": "        controller = &controllerIn;",
+        "after": "        controller = &controllerIn;\n        notification = std::move (callback);"
+      },
+      {
+        "before": "            controller->setParamNormalized (cache.getParamID (index), value);\n        });",
+        "after": "            controller->setParamNormalized (cache.getParamID (index), value);\n            if (notification) notification (index, value);\n        });"
+      },
+      {
+        "before": "            controller->setParamNormalized (cache.getParamID (index), value);\n        else",
+        "after": "        {\n            controller->setParamNormalized (cache.getParamID (index), value);\n            if (notification) notification (index, value);\n        }\n        else"
+      },
+      {
+        "before": "    CachedParamValues cache;\n    Vst::IEditController* controller",
+        "after": "    std::function<void (Steinberg::int32, float)> notification;\n    CachedParamValues cache;\n    Vst::IEditController* controller"
+      },
+      {
+        "before": "                sendValueChangedMessageToListeners (newValue);\n        }",
+        "after": "            {\n               #if NOVA_VST3_RT_GUARD\n                pluginInstance.parameterDispatcher.push (vstParamIndex, newValue);\n               #else\n                sendValueChangedMessageToListeners (newValue);\n               #endif\n            }\n        }"
+      },
+      {
+        "before": "        parameterDispatcher.start (*editController);",
+        "after": "       #if NOVA_VST3_RT_GUARD\n        parameterDispatcher.start (*editController, [this] (Steinberg::int32 index, float value)\n        {\n            if (auto* param = getParameterForID (cachedParamValues.getParamID (index)))\n                param->sendValueChangedMessageToListeners (value);\n        });\n       #else\n        parameterDispatcher.start (*editController);\n       #endif"
+      },
+      {
+        "before": "        MidiEventList::toMidiBuffer (midiMessages, *midiOutputs);",
+        "after": "       #if ! NOVA_VST3_RT_GUARD\n        MidiEventList::toMidiBuffer (midiMessages, *midiOutputs);\n       #endif // NOVA audio-only host does not export plugin MIDI events."
+      },
+      {
+        "before": "    SpinLock processMutex;",
+        "after": "    SpinLock processMutex;\n   #if NOVA_VST3_RT_GUARD\n    std::atomic<uint64_t> novaContendedBlocks { 0 };\n   #endif"
+      },
+      {
+        "before": "    //==============================================================================\n    void processBlock (AudioBuffer<float>& buffer",
+        "after": "   #if NOVA_VST3_RT_GUARD\n    uint64_t getNonBlockingDropoutCount() const noexcept override\n    {\n        return novaContendedBlocks.load (std::memory_order_relaxed);\n    }\n   #endif\n    //==============================================================================\n    void processBlock (AudioBuffer<float>& buffer"
+      }
+    ]
+  },
+  {
+    "path": "format_types/juce_VST3Common.h",
+    "original": "5eb808a5fb88c9436188e423254494cd29f5428f5a4e17865079da435d164e89",
+    "patched": "51426860fa2aa467b6e722e51ba04408c9de63ccbc2bc0b5517d3f1b92cd4859",
+    "replacements": [
+      {
+        "before": "    MidiEventList() = default;",
+        "after": "    MidiEventList()\n    {\n       #if NOVA_VST3_RT_GUARD\n        events.ensureStorageAllocated (2048);\n       #endif\n    }"
+      },
+      {
+        "before": "        events.add (e);",
+        "after": "       #if NOVA_VST3_RT_GUARD\n        if (events.size() >= 2048) return Steinberg::kResultFalse;\n       #endif\n        events.add (e);"
+      },
+      {
+        "before": "    Array<Steinberg::Vst::Event, CriticalSection> events;",
+        "after": "   #if NOVA_VST3_RT_GUARD\n    // Single process-thread ownership; the wrapper's process gate protects lifecycle.\n    Array<Steinberg::Vst::Event> events;\n   #else\n    Array<Steinberg::Vst::Event, CriticalSection> events;\n   #endif"
+      },
+      {
+        "before": "class ComponentRestarter : private AsyncUpdater",
+        "after": "class ComponentRestarter\n   #if NOVA_VST3_RT_GUARD\n    : private Timer\n   #else\n    : private AsyncUpdater\n   #endif"
+      },
+      {
+        "before": "        : listener (listenerIn) {}",
+        "after": "        : listener (listenerIn)\n    {\n       #if NOVA_VST3_RT_GUARD\n        startTimerHz (60);\n       #endif\n    }"
+      },
+      {
+        "before": "        cancelPendingUpdate();",
+        "after": "       #if NOVA_VST3_RT_GUARD\n        stopTimer();\n       #else\n        cancelPendingUpdate();\n       #endif"
+      },
+      {
+        "before": "        else\n            triggerAsyncUpdate();",
+        "after": "       #if ! NOVA_VST3_RT_GUARD\n        else\n            triggerAsyncUpdate();\n       #endif"
+      },
+      {
+        "before": "    void handleAsyncUpdate() override\n    {\n        listener.restartComponentOnMessageThread (flags.exchange (0));\n    }",
+        "after": "   #if NOVA_VST3_RT_GUARD\n    void timerCallback() override { if (flags.load() != 0) handleAsyncUpdate(); }\n    void handleAsyncUpdate()\n   #else\n    void handleAsyncUpdate() override\n   #endif\n    {\n        const auto pending = flags.exchange (0);\n        if (pending != 0) listener.restartComponentOnMessageThread (pending);\n    }"
+      }
+    ]
+  },
+  {
+    "path": "processors/juce_AudioProcessor.h",
+    "original": "d6d2e9eb9e9ce2d23734118c51428eaa67095e9f0090915f0e95051a1be74199",
+    "patched": "24145d3d2f4f087f2774cc9bdbb47e1c043705ae0ff67a08add024285e1f241e",
+    "replacements": [
+      {
+        "before": "    int blockSize = 0, latencySamples = 0;\n    bool suspended = false;",
+        "after": "    int blockSize = 0;\n    std::atomic<int> latencySamples { 0 };\n    std::atomic<bool> suspended { false };"
+      }
+    ]
+  },
+  {
+    "path": "processors/juce_AudioPluginInstance.h",
+    "original": "c54917541f49d530e8c70a1e9ad8eea02a712ec156ce715d8698cdb25b8bb813",
+    "patched": "af7ca52ead17e283bce6f8bd27087dfcf3f2c22ad652dd643b8e174a6fa16838",
+    "replacements": [
+      {
+        "before": "    ~AudioPluginInstance() override = default;",
+        "after": "    ~AudioPluginInstance() override = default;\n\n   #if NOVA_VST3_RT_GUARD\n    // NOVA diagnostic: contention fallback count, not external plugin safety certification.\n    virtual uint64_t getNonBlockingDropoutCount() const noexcept { return 0; }\n   #endif"
+      }
+    ]
+  }
+]

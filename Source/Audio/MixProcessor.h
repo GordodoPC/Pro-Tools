@@ -3,6 +3,7 @@
 #include <juce_dsp/juce_dsp.h>
 #include <atomic>
 #include <array>
+#include "DelayCompensation.h"
 
 namespace nova {
 constexpr int mixBlockSize = 256;
@@ -36,7 +37,14 @@ public:
     static std::unique_ptr<MixProcessor> restore(const juce::var&, double, juce::String&);
     void openEditor();
     void closeEditor();
+    int latencySamples() const noexcept { return preparedLatency; }
+    bool latencyChanged() const noexcept;
+    uint64_t contentionDropouts() const noexcept;
+    static constexpr int maximumInsertLatency = 65536;
 private:
+    int preparedLatency = 0, missingLatency = 0;
+    StereoDelay dryCompensation;
+    bool prepared = false;
     double sampleRate = 44100;
     std::array<juce::SmoothedValue<float>, 24> smoothed;
     juce::SmoothedValue<float> wet;

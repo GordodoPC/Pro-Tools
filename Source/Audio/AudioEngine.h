@@ -4,6 +4,7 @@
 #include <atomic>
 #include <memory>
 #include <vector>
+#include <thread>
 #include "MixProcessor.h"
 
 namespace nova {
@@ -46,6 +47,16 @@ struct Track {
 class AudioEngine final : public juce::AudioIODeviceCallback {
 public:
     AudioEngine();
+    // Mutations have one control-thread owner. Render uses a single CAS and never waits.
+    // The guard waits for an existing render to finish on the control thread only.
+    class MutationGuard {
+    public:
+        explicit MutationGuard(AudioEngine&);
+        ~MutationGuard();
+        MutationGuard(const MutationGuard&) = delete;
+        MutationGuard& operator=(const MutationGuard&) = delete;
+    private: AudioEngine& engine;
+    };
     static constexpr int maxTracks = 64;
     static constexpr int64_t maxSessionBytes = 512LL * 1024 * 1024;
     static constexpr int maxRegionsPerTrack = 128;
@@ -62,7 +73,12 @@ public:
     void prepareProcessors();
     void closeEditors();
     void replaceSession(AudioEngine& validated);
-    double sampleRate() const { return outputRate; }
+    double sampleRate() const { return outputRate.load(); }
+    bool needsMaintenance() const;
+    bool pdcValid() const { return pdcReady.load(); }
+    int latencySamples() const { return visibleLatency.load(); }
+    juce::String processingError() const { return configurationError; } // control thread only
+    uint64_t contentionDropouts() const;
     void setSmoothingTime(double seconds);
     int trackCount() const { return count; }
     Track& track(int index) { return tracks.at(static_cast<size_t>(index)); }
@@ -77,7 +93,7 @@ public:
     void play() { playing.store(true); }
     void pause() { playing.store(false); }
     void stop() { pause(); seek(0); }
-    void seek(double seconds);
+    void seek(double seconds); // control thread: plugin reset is quiesced, never called by render
     bool isPlaying() const { return playing.load(); }
     double position() const { return visiblePosition.load(); }
     void setOutputRate(double rate);
@@ -98,7 +114,9 @@ private:
     std::atomic<double> visiblePosition{0}, requestedPosition{0};
     std::atomic<uint64_t> seekGeneration{0};
     uint64_t consumedSeek = 0;
-    double renderPosition = 0, outputRate = 44100;
+    double renderPosition = 0, seekOrigin = 0;
+    int64_t elapsedSinceSeek = 0;
+    std::atomic<double> outputRate{44100}, requestedDeviceRate{44100};
     uint64_t nextRegionId = 1;
     std::array<juce::AudioBuffer<float>, maxTracks> channelBuffers;
     juce::AudioBuffer<float> masterBuffer;
@@ -112,6 +130,12 @@ private:
     bool smoothingInitialized = false;
     std::array<float, maxTracks> blockPeaks{}, blockRms{};
     float blockMasterPeak = 0, blockMasterRms = 0;
+    std::atomic<unsigned> processingGate{0};
+    int mutationDepth = 0;
+    DelayCompensation compensation;
+    std::atomic<bool> pdcReady{true};
+    std::atomic<int> visibleLatency{0};
+    juce::String configurationError;
     void renderBlock(float* const*, int channels, int offset, int frames) noexcept;
 };
 
@@ -122,9 +146,11 @@ public:
     juce::String initialError;
     AudioRuntime();
     ~AudioRuntime();
+    void serviceMaintenance(); // message thread: rate/latency changes; never from callback
     template<class F> void editStructure(F&& edit) {
         const bool resume = engine.isPlaying();
         engine.pause();
+        AudioEngine::MutationGuard mutation(engine);
         devices.removeAudioCallback(&engine);
         try { edit(); engine.prepareProcessors(); } catch (...) { devices.addAudioCallback(&engine); throw; }
         devices.addAudioCallback(&engine);

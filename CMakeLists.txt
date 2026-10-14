@@ -9,15 +9,17 @@ if(MSVC AND CMAKE_CXX_CL_SHOWINCLUDES_PREFIX MATCHES "^Observa")
     set(CMAKE_CL_SHOWINCLUDES_PREFIX "Observação: incluindo arquivo: ")
 endif()
 include(CTest)
+include(cmake/JuceRealtimePatch.cmake)
 add_subdirectory(external/JUCE)
 
-add_library(NovaCore STATIC Source/Audio/AudioEngine.cpp Source/Audio/MixProcessor.cpp Source/Audio/PluginCatalog.cpp Source/Session/Session.cpp Source/Session/EditModel.cpp Source/Session/Preferences.cpp)
+add_library(NovaCore STATIC Source/Audio/AudioEngine.cpp Source/Audio/MixProcessor.cpp Source/Audio/DelayCompensation.cpp Source/Audio/PluginCatalog.cpp Source/Session/Session.cpp Source/Session/EditModel.cpp Source/Session/Preferences.cpp)
 target_include_directories(NovaCore PUBLIC Source external/JUCE/modules)
 target_compile_options(NovaCore PUBLIC $<$<CXX_COMPILER_ID:MSVC>:/utf-8>)
 target_compile_definitions(NovaCore PUBLIC
     JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
     JUCE_STANDALONE_APPLICATION=1 JUCE_MODAL_LOOPS_PERMITTED=0
     JUCE_PLUGINHOST_VST3=1 JUCE_PLUGINHOST_VST=0 JUCE_USE_VST3_SDK=1
+    NOVA_VST3_RT_GUARD=1
     JUCE_MODULE_AVAILABLE_juce_dsp=1 JUCE_MODULE_AVAILABLE_juce_audio_processors=1)
 target_compile_definitions(NovaCore PUBLIC JUCE_MODULE_AVAILABLE_juce_audio_utils=1 JUCE_MODULE_AVAILABLE_juce_audio_devices=1
     JUCE_MODULE_AVAILABLE_juce_audio_formats=1 JUCE_MODULE_AVAILABLE_juce_audio_basics=1
@@ -71,4 +73,9 @@ if(BUILD_TESTING)
         DEPENDS NovaPluginScanner NovaPhase3Tests)
     add_test(NAME DSPVST3AutomationSessions COMMAND NovaPhase3Tests
         "${CMAKE_BINARY_DIR}/test-data" "$<TARGET_FILE:NovaTestGain_VST3>" "$<TARGET_FILE:NovaPluginScanner>")
+    juce_add_console_app(NovaPdcTests PRODUCT_NAME "NOVA PDC tests")
+    target_sources(NovaPdcTests PRIVATE tests/PdcTests.cpp)
+    target_link_libraries(NovaPdcTests PRIVATE NovaCore)
+    add_dependencies(NovaPdcTests NovaTestGain_VST3)
+    add_test(NAME PluginDelayCompensation COMMAND NovaPdcTests "${CMAKE_BINARY_DIR}/test-data" "$<TARGET_FILE:NovaTestGain_VST3>")
 endif()

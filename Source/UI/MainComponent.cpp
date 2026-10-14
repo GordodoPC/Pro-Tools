@@ -339,11 +339,12 @@ bool MainComponent::validateEditor() {
     return ok;
 }
 void MainComponent::timerCallback() {
+    audio.serviceMaintenance();
     const double seconds = audio.engine.position();
     clock.setText(juce::String(static_cast<int>(seconds)/60).paddedLeft('0',2) + ":"
         + juce::String(std::fmod(seconds,60.0),2).paddedLeft('0',5), juce::dontSendNotification);
     status.setText((dirty ? "* " : "") + (currentSession == juce::File{} ? "Sessao sem nome" : currentSession.getFileName())
-        + " | " + juce::String(audio.engine.trackCount()) + " faixas | " + audio.deviceDescription(), juce::dontSendNotification);
+        + " | " + juce::String(audio.engine.trackCount()) + " faixas | PDC " + juce::String(audio.engine.latencySamples()) + " samples | VST skips " + juce::String(audio.engine.contentionDropouts()) + " | " + audio.engine.processingError() + " | " + audio.deviceDescription(), juce::dontSendNotification);
     trackPanel.refresh(); mixer.refresh(); ruler.repaint(); timeline.repaint(); repaint();
     master.setValue(juce::Decibels::gainToDecibels(audio.engine.masterGain.load(),-60.0f),juce::dontSendNotification);
     if (validationStep < 0 || ++callbackTicks % 15 != 0) return;
