@@ -1,0 +1,6 @@
+/build/
+/.setup/
+/external/JUCE/
+*.user
+*.wav
+*.novadaw

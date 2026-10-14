@@ -1,0 +1,8 @@
+{
+  "JUCE": {
+    "repository": "https://github.com/juce-framework/JUCE.git",
+    "tag": "9.0.4",
+    "commit": "3fb5cbc0340758596dac39f7c8de47d562b4896e",
+    "path": "external/JUCE"
+  }
+}
