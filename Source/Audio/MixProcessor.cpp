@@ -1,4 +1,5 @@
 #include "MixProcessor.h"
+#include "Midi/MidiData.h"
 #include <cmath>
 
 namespace nova {
@@ -61,6 +62,7 @@ void MixProcessor::prepare(double rate){
     if(kind==EffectKind::delay){delayBuffer.setSize(2,static_cast<int>(rate*2)+mixBlockSize+2);delayBuffer.clear();delayGeneration.assign(static_cast<size_t>(delayBuffer.getNumSamples()),0);currentDelayGeneration=1;}
     reverberator.setSampleRate(rate);
     if(plugin){plugin->releaseResources();plugin->setRateAndBufferSizeDetails(rate,mixBlockSize);plugin->prepareToPlay(rate,mixBlockSize);}
+    midi.ensureSize(8192);
     const int reported=plugin?plugin->getLatencySamples():missingLatency;
     if(reported<0 || reported>maximumInsertLatency){failure="Latencia do insert excede 65536 amostras.";faulted=true;bypass=true;preparedLatency=0;}
     else preparedLatency=reported;
@@ -84,7 +86,7 @@ std::array<std::array<float,6>,7> eqCoefficients(const std::array<float,24>& p,d
 }
 }
 void MixProcessor::updateEq(const std::array<float,24>& p,double rate){coefficients=eqCoefficients(p,rate);}
-void MixProcessor::process(juce::AudioBuffer<float>& buffer,int frames)noexcept {
+void MixProcessor::process(juce::AudioBuffer<float>& buffer,int frames,const juce::MidiBuffer* inputMidi,int midiOffset)noexcept {
     if(frames<1 || frames>mixBlockSize || buffer.getNumChannels()<2 || buffer.getNumSamples()<frames)return;
     auto* l=buffer.getWritePointer(0);auto* r=buffer.getWritePointer(1);
     for(int s=0;s<frames;++s){const auto delayed=dryCompensation.process(l[s],r[s]);dry[0][s]=delayed[0];dry[1][s]=delayed[1];}
@@ -95,6 +97,12 @@ void MixProcessor::process(juce::AudioBuffer<float>& buffer,int frames)noexcept 
         if(plugin && !faulted.load() && !suspended){
             // A view into preallocated stereo memory; two channels fit JUCE's inline pointer array.
             float* pointers[]{l,r};juce::AudioBuffer<float> view(pointers,2,frames);midi.clear();
+            if(inputMidi){int added=0;for(const auto event:*inputMidi){
+                if(event.samplePosition<midiOffset||event.samplePosition>=midiOffset+frames)continue;
+                if(event.numBytes>3||event.numBytes<1)continue;
+                if(++added>maximumMidiEventsPerBlock){midi.clear();midiPanic(midi);break;}
+                midi.addEvent(event.data,event.numBytes,event.samplePosition-midiOffset);
+            }}
             try{plugin->processBlock(view,midi);}catch(...){bypass=true;faulted=true;wet.setCurrentAndTargetValue(0);}
         }
     }else {
@@ -174,8 +182,9 @@ std::unique_ptr<MixProcessor> MixProcessor::restore(const juce::var& v,double ra
         p->plugin=formats.createPluginInstance(p->description,rate,mixBlockSize,p->failure);
         if(p->plugin){
             auto layout=p->plugin->getBusesLayout();
-            if(layout.inputBuses.size()!=1 || layout.outputBuses.size()!=1){p->failure="Somente efeitos stereo sem sidechain.";p->plugin.reset();}
-            else{layout.inputBuses.set(0,juce::AudioChannelSet::stereo());layout.outputBuses.set(0,juce::AudioChannelSet::stereo());
+            const bool instrument=p->description.isInstrument;
+            if(layout.outputBuses.size()!=1 || (instrument?layout.inputBuses.size()>1:layout.inputBuses.size()!=1) || (instrument&&!p->plugin->acceptsMidi())){p->failure="Efeito stereo ou instrumento MIDI com saida stereo sem sidechain exigido.";p->plugin.reset();}
+            else{if(!layout.inputBuses.isEmpty())layout.inputBuses.set(0,instrument?juce::AudioChannelSet::disabled():juce::AudioChannelSet::stereo());layout.outputBuses.set(0,juce::AudioChannelSet::stereo());
                 if(!p->plugin->setBusesLayout(layout)){p->failure="Efeito nao suporta stereo.";p->plugin.reset();}}
             if(p->plugin && p->savedState.getSize())p->plugin->setStateInformation(p->savedState.getData(),static_cast<int>(p->savedState.getSize()));
         }
@@ -189,6 +198,10 @@ std::unique_ptr<MixProcessor> MixProcessor::restore(const juce::var& v,double ra
     p->prepare(rate);return p;
 }
 bool MixProcessor::latencyChanged()const noexcept{return plugin && !faulted.load() && plugin->getLatencySamples()!=preparedLatency;}
+std::unique_ptr<MixProcessor> MixProcessor::loadPlugin(const juce::PluginDescription& description,double rate,juce::String& error){
+    auto v=std::make_unique<juce::DynamicObject>();v->setProperty("kind",5);v->setProperty("bypass",false);v->setProperty("parameters",juce::Array<juce::var>{});
+    v->setProperty("description",description.createXml()->toString());v->setProperty("state","");return restore(juce::var(v.release()),rate,error);
+}
 uint64_t MixProcessor::contentionDropouts()const noexcept{return plugin?plugin->getNonBlockingDropoutCount():0;}
 void MixProcessor::openEditor(){if(!plugin)return;if(!editorWindow){auto* editor=plugin->createEditorIfNeeded();if(!editor)editor=new juce::GenericAudioProcessorEditor(*plugin);editorWindow=std::make_unique<EditorWindow>(editor,name());}editorWindow->setVisible(true);editorWindow->toFront(true);}
 void MixProcessor::closeEditor(){editorWindow.reset();}

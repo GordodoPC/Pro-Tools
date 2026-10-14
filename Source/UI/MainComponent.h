@@ -1,6 +1,7 @@
 #pragma once
 #include "Audio/AudioEngine.h"
 #include "EditorComponents.h"
+#include "MidiComponents.h"
 #include "Session/Preferences.h"
 #include "Session/Session.h"
 #include <functional>
@@ -20,6 +21,7 @@ public:
     bool openSession(const juce::File&);
     void requestClose();
     void enableUiValidation(const juce::File& outputDirectory);
+    void enableMidiUiValidation(const juce::File& outputDirectory);
 private:
     AudioRuntime audio;
     EditModel editor;
@@ -45,6 +47,12 @@ private:
     juce::Slider master, zoom;
     juce::LookAndFeel_V4 look;
     std::unique_ptr<juce::FileChooser> chooser;
+    std::unique_ptr<juce::DocumentWindow> midiWindow;
+    void addMidiTrack();
+    void openMidiEditor();
+    void closeMidiEditing();
+    void midiUiValidation();
+    bool validationMidi=false,validationMidiBindings=false,validationMidiAudio=false;
     juce::File currentSession;
     bool mixVisible = false, dirty = false;
     void timerCallback() override;

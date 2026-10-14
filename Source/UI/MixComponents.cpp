@@ -145,7 +145,7 @@ void ChannelStrip::showError(const juce::String& text){juce::AlertWindow::showMe
 void ChannelStrip::insertMenu(int slot){
     juce::PopupMenu menu;const auto& p=chain()[slot];if(p){menu.addItem(1,"Abrir "+p->name());menu.addItem(2,"Bypass",true,p->bypass);menu.addItem(3,"Remover");menu.addSeparator();}
     menu.addItem(10,"NOVA EQ");menu.addItem(11,"NOVA Compressor");menu.addItem(12,"NOVA Gate");menu.addItem(13,"NOVA Delay");menu.addItem(14,"NOVA Reverb");
-    const auto types=catalog.known.getTypes();if(!types.isEmpty()){juce::PopupMenu vst;for(int i=0;i<types.size();++i)vst.addItem(100+i,types[i].name);menu.addSubMenu("VST3",vst);}
+    const auto types=catalog.known.getTypes();if(!types.isEmpty()){juce::PopupMenu vst;for(int i=0;i<types.size();++i)if(!types[i].isInstrument)vst.addItem(100+i,types[i].name);menu.addSubMenu("VST3",vst);}
     menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&inserts[slot]),[safe=juce::Component::SafePointer<ChannelStrip>(this),slot,types](int id){
         if(!safe || !id)return;auto& p=safe->chain()[slot];
         if(id==1 && p){if(p->kind==EffectKind::vst3){if(p->plugin){AudioEngine::MutationGuard guard(safe->engine);p->openEditor();}else safe->showError(p->failure);}
@@ -172,7 +172,7 @@ void ChannelStrip::refresh(){
     gain.setValue(juce::Decibels::gainToDecibels(t?t->gain.load():engine.masterGain.load(),-60.0f),juce::dontSendNotification);
     if(t){pan.setValue(t->pan.load(),juce::dontSendNotification);inputGain.setValue(juce::Decibels::gainToDecibels(t->inputGain.load(),-24.0f),juce::dontSendNotification);
         output.setSelectedId(t->outputTarget<0?t->outputMode.load()+1:t->outputTarget+4,juce::dontSendNotification);solo.setToggleState(t->solo,juce::dontSendNotification);automation.setButtonText(t->automationMode==AutomationMode::read?"Auto Read":"Auto Off");}
-    input.setText(!t?"OUT: dispositivo stereo":t->auxiliary?(t->monoBus?"IN: bus mono":"IN: bus stereo"):"IN: regioes WAV",juce::dontSendNotification);
+    input.setText(!t?"OUT: dispositivo stereo":t->midiTrack?"IN: MIDI":t->auxiliary?(t->monoBus?"IN: bus mono":"IN: bus stereo"):"IN: regioes WAV",juce::dontSendNotification);
     mute.setToggleState(t?t->mute.load():engine.masterMute.load(),juce::dontSendNotification);
     const float peak=t?t->peak.load():engine.masterPeak.load();peakLabel.setText("Peak "+juce::String(juce::Decibels::gainToDecibels(peak,-90.0f),1)+" dB",juce::dontSendNotification);
     clip.setColour(juce::TextButton::buttonColourId,(t?t->clipped.load():engine.masterClipped.load())?juce::Colour(0xffb74658):juce::Colour(0xff283446));

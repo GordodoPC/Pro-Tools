@@ -31,7 +31,9 @@ public:
     juce::String name() const;
     void prepare(double);
     void reset(bool resetPlugin = true);
-    void process(juce::AudioBuffer<float>&, int frames) noexcept;
+    void process(juce::AudioBuffer<float>&, int frames,const juce::MidiBuffer* inputMidi=nullptr,int midiOffset=0) noexcept;
+    bool isInstrument() const noexcept { return kind==EffectKind::vst3 && description.isInstrument; }
+    static std::unique_ptr<MixProcessor> loadPlugin(const juce::PluginDescription&,double,juce::String&);
     double magnitude(double frequency, double rate) const;
     juce::var state() const;
     static std::unique_ptr<MixProcessor> restore(const juce::var&, double, juce::String&);

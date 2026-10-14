@@ -6,7 +6,7 @@ int main(int argc,char** argv){
     try{
         juce::VST3PluginFormat format;juce::OwnedArray<juce::PluginDescription> types;
         format.findAllTypesForFile(types,juce::String::fromUTF8(argv[1]));juce::KnownPluginList list;
-        for(const auto* type:types)if(!type->isInstrument){
+        for(const auto* type:types){
             // Metadata may come from moduleinfo.json. Probe construction in this child too,
             // so constructors that fail are never first exercised in the session process.
             juce::String error;auto instance=format.createInstanceFromDescription(*type,48000,256,error);
@@ -14,7 +14,7 @@ int main(int argc,char** argv){
             auto description=*type;
             description.numInputChannels=instance->getTotalNumInputChannels();
             description.numOutputChannels=instance->getTotalNumOutputChannels();
-            if(description.numInputChannels!=2 || description.numOutputChannels!=2)continue;
+            if(description.numOutputChannels!=2 || (description.isInstrument?(description.numInputChannels!=0||!instance->acceptsMidi()):description.numInputChannels!=2))continue;
             instance->prepareToPlay(48000,256);instance->releaseResources();list.addType(description);
         }
         if(auto xml=list.createXml())return juce::File(juce::String::fromUTF8(argv[2])).replaceWithText(xml->toString())?0:3;

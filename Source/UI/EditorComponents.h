@@ -41,6 +41,8 @@ public:
     void mouseDrag(const juce::MouseEvent&) override;
     void mouseUp(const juce::MouseEvent&) override;
     void mouseMove(const juce::MouseEvent&) override;
+    void mouseDoubleClick(const juce::MouseEvent&) override;
+    std::function<void(int)> midiEdit;
     void setZoom(double);
     void updateSize();
     int rowTop(int) const;
@@ -76,6 +78,7 @@ public:
     bool validatePhase3Bindings();
     void scanPlugins(const juce::FileSearchPath& paths){catalog.scan(paths);}
     void addPluginDirectory(const juce::File& path){if(catalog.addDirectory(path))catalog.scanConfigured();}
+    PluginCatalog& pluginCatalog(){return catalog;}
     std::function<void(bool)> onAddAux;
     std::function<void()> onScanFolder;
 private:

@@ -15,8 +15,8 @@ TrackControls::TrackControls(AudioEngine& e,EditModel& ed,int i,bool v,ApplyEdit
     name.setEditable(false,true,false);name.setFont(juce::Font(juce::FontOptions(14).withStyle("Bold")));
     name.onTextChange=[this]{const auto text=name.getText();apply([this,text]{editor.rename(index,text);return true;});};
     gainLabel.setText("VOL dB",juce::dontSendNotification);panLabel.setText("PAN",juce::dontSendNotification);
-    input.setText(engine.track(index).auxiliary?"IN: bus":"IN: regioes WAV",juce::dontSendNotification);input.setFont(11.0f);
-    record.setEnabled(false);record.setTooltip("Record Arm pendente: o motor ainda nao grava.");
+    input.setText(engine.track(index).midiTrack?"IN: MIDI":engine.track(index).auxiliary?"IN: bus":"IN: regioes WAV",juce::dontSendNotification);input.setFont(11.0f);
+    record.setEnabled(engine.track(index).midiTrack);record.setClickingTogglesState(true);record.setTooltip(engine.track(index).midiTrack?"Armar gravacao MIDI":"Gravacao de audio ainda pendente.");record.onClick=[this,changed]{engine.track(index).midiArm=record.getToggleState();changed();};
     gain.setRange(-60,6,0.1);gain.setDoubleClickReturnValue(true,0);
     gain.setSliderStyle(v?juce::Slider::LinearVertical:juce::Slider::LinearHorizontal);
     gain.setTextBoxStyle(v?juce::Slider::TextBoxBelow:juce::Slider::TextBoxRight,false,56,18);
@@ -49,7 +49,7 @@ void TrackControls::refresh(){
     gain.setValue(juce::Decibels::gainToDecibels(t.gain.load(),-60.0f),juce::dontSendNotification);
     pan.setValue(t.pan.load(),juce::dontSendNotification);
     mute.setToggleState(t.mute.load(),juce::dontSendNotification);solo.setToggleState(t.solo.load(),juce::dontSendNotification);
-    output.setSelectedId(t.outputTarget<0?t.outputMode.load()+1:t.outputTarget+4,juce::dontSendNotification);repaint();
+    output.setSelectedId(t.outputTarget<0?t.outputMode.load()+1:t.outputTarget+4,juce::dontSendNotification);record.setToggleState(t.midiArm,juce::dontSendNotification);repaint();
 }
 bool TrackControls::validateBindings(){refresh();
     auto& t=engine.track(index);const auto oldGain=t.gain.load(),oldPan=t.pan.load();const auto oldRoute=t.outputMode.load();const bool oldMute=t.mute.load(),oldSolo=t.solo.load();
@@ -92,7 +92,7 @@ int Timeline::rowTop(int i)const{int y=0;for(int n=0;n<i;++n)y+=rowHeight(n);ret
 int Timeline::trackAt(int y)const{for(int i=0;i<engine.trackCount();++i)if(y>=rowTop(i)&&y<rowTop(i)+rowHeight(i))return i;return -1;}
 juce::Rectangle<float> Timeline::boundsFor(int i,const Track::Region& r)const{return {static_cast<float>(r.start*pixelsPerSecond),rowTop(i)+10.0f,static_cast<float>(r.length*pixelsPerSecond),rowHeight(i)-20.0f};}
 void Timeline::setZoom(double zoom){pixelsPerSecond=zoom;updateSize();}
-void Timeline::updateSize(){setSize(std::max(1100,static_cast<int>(std::min(2000000.0,std::max(15.0,engine.duration()+5)*pixelsPerSecond))),std::max(500,rowTop(engine.trackCount())));repaint();}
+void Timeline::updateSize(){setSize(std::max(1100,static_cast<int>(std::min(2000000.0,std::max(15.0,std::max(engine.duration(),engine.position())+5)*pixelsPerSecond))),std::max(500,rowTop(engine.trackCount())));repaint();}
 void Timeline::paint(juce::Graphics& g){
     g.fillAll(bg);const auto visible=g.getClipBounds();const double beat=60/engine.bpm*(4.0/engine.beatUnit),step=beat*editor.gridBeats;
     const bool fine=step*pixelsPerSecond>=8;const double drawStep=fine?step:beat*engine.beatsPerBar;
@@ -101,6 +101,13 @@ void Timeline::paint(juce::Graphics& g){
         g.setColour(bar?line.brighter(0.1f):line.withAlpha(0.45f));g.drawVerticalLine(x,0,static_cast<float>(getHeight()));}
     for(int i=0;i<engine.trackCount();++i){auto& t=engine.track(i);const int y=rowTop(i),h=rowHeight(i);
         g.setColour(line);g.drawHorizontalLine(y+h-1,0,static_cast<float>(getWidth()));
+        if(t.midiTrack)for(const auto& clip:t.midiClips){const double start=ticksToSeconds(clip.start,engine.bpm.load()),length=ticksToSeconds(clip.length,engine.bpm.load());
+            juce::Rectangle<float> box(float(start*pixelsPerSecond),float(y+10),float(length*pixelsPerSecond),float(h-20));if(!box.intersects(visible.toFloat()))continue;
+            const bool selected=clip.id==editor.selectedRegion;g.setColour(juce::Colour(t.colour).withAlpha(0.22f));g.fillRoundedRectangle(box,3);g.setColour(selected?accent:juce::Colour(t.colour));g.drawRoundedRectangle(box,3,selected?2.0f:1.0f);
+            g.setFont(12.0f);g.drawText(clip.name+" MIDI",box.toNearestInt().reduced(6).removeFromTop(18),juce::Justification::centredLeft);
+            for(const auto& note:clip.notes){if(note.tick+note.length<=clip.offset||note.tick>=clip.offset+clip.length)continue;
+                const double noteStart=ticksToSeconds(clip.start+std::max(note.tick,clip.offset)-clip.offset,engine.bpm.load());const double noteEnd=ticksToSeconds(clip.start+std::min(note.tick+note.length,clip.offset+clip.length)-clip.offset,engine.bpm.load());
+                g.fillRect(float(noteStart*pixelsPerSecond),box.getY()+25+(127-note.pitch)/127.0f*std::max(10.0f,box.getHeight()-35),float(std::max(2.0,(noteEnd-noteStart)*pixelsPerSecond)),3.0f);}}
         for(const auto& r:t.regions){auto box=boundsFor(i,r);if(!box.intersects(visible.toFloat()))continue;
             const bool selected=editor.selectedRegion==r.id;const auto colour=juce::Colour(t.colour);
             g.setColour(colour.withAlpha(selected?0.34f:0.17f));g.fillRoundedRectangle(box,3);g.setColour(selected?accent:colour);g.drawRoundedRectangle(box,3,selected?2.0f:1.0f);
@@ -123,6 +130,8 @@ void Timeline::mouseDown(const juce::MouseEvent& e){
     resizing=e.y>=rowTop(dragTrack)+rowHeight(dragTrack)-6;
     if(resizing){dragging=true;dragOrigin=e.position.toInt();return;}
     const double time=editor.quantize(e.x/pixelsPerSecond);engine.seek(time);
+    if(engine.track(dragTrack).midiTrack){uint64_t id=0;for(const auto& clip:engine.track(dragTrack).midiClips){const double begin=ticksToSeconds(clip.start,engine.bpm.load()),end=ticksToSeconds(clip.start+clip.length,engine.bpm.load());if(time>=begin&&time<end){id=clip.id;break;}}
+        editor.select(dragTrack,id);if(selectionChanged)selectionChanged();if(e.mods.isPopupMenu()&&midiEdit)midiEdit(dragTrack);return;}
     Track::Region* hit=nullptr;for(auto& r:engine.track(dragTrack).regions)if(boundsFor(dragTrack,r).contains(e.position)){hit=&r;break;}
     editor.select(dragTrack,hit?hit->id:0);if(selectionChanged)selectionChanged();
     if(e.mods.isPopupMenu()){juce::PopupMenu p;p.addItem(20,"Copy",hit!=nullptr);p.addItem(21,"Paste",editor.canPaste());p.addItem(22,"Delete",hit!=nullptr);p.addItem(23,"Split at cursor",hit!=nullptr);p.addItem(24,"Loop selected clip",hit!=nullptr);
@@ -150,6 +159,7 @@ void Timeline::mouseUp(const juce::MouseEvent& e){
     else apply([this]{return editor.move(previewStart,previewTrack);});
     repaint();
 }
+void Timeline::mouseDoubleClick(const juce::MouseEvent& event){const int index=trackAt(event.y);if(index>=0&&engine.track(index).midiTrack&&midiEdit)midiEdit(index);}
 void Timeline::mouseMove(const juce::MouseEvent& e){const int i=trackAt(e.y);setMouseCursor(i>=0&&e.y>=rowTop(i)+rowHeight(i)-6?juce::MouseCursor::UpDownResizeCursor:tool==Tool::selector?juce::MouseCursor::IBeamCursor:juce::MouseCursor::NormalCursor);}
 Ruler::Ruler(AudioEngine& e,EditModel& ed,Timeline& t):engine(e),editor(ed),timeline(t){}
 void Ruler::paint(juce::Graphics& g){
@@ -186,12 +196,13 @@ bool Mixer::validatePhase3Bindings(){if(engine.trackCount()<2 || controls.empty(
 }
 bool Mixer::validateBindings(){return !controls.empty()&&controls.front()->validateBindings();}
 ClipPanel::ClipPanel(AudioEngine& e,EditModel& ed):engine(e),editor(ed),list("Clips",this){addAndMakeVisible(list);list.setColour(juce::ListBox::backgroundColourId,bg);list.setRowHeight(46);}
-void ClipPanel::refresh(){rows.clear();for(int i=0;i<engine.trackCount();++i)for(const auto& r:engine.track(i).regions)rows.emplace_back(i,r.id);list.updateContent();list.repaint();}
+void ClipPanel::refresh(){rows.clear();for(int i=0;i<engine.trackCount();++i){for(const auto& r:engine.track(i).regions)rows.emplace_back(i,r.id);for(const auto& clip:engine.track(i).midiClips)rows.emplace_back(i,clip.id);}list.updateContent();list.repaint();}
 void ClipPanel::paint(juce::Graphics& g){g.fillAll(panel);g.setColour(juce::Colours::white);g.setFont(14.0f);g.drawText("CLIPS  /  "+juce::String(rows.size()),10,0,getWidth()-20,35,juce::Justification::centredLeft);}
 void ClipPanel::resized(){list.setBounds(getLocalBounds().withTrimmedTop(36));}
 int ClipPanel::getNumRows(){return static_cast<int>(rows.size());}
 void ClipPanel::paintListBoxItem(int row,juce::Graphics& g,int w,int h,bool selected){if(row<0||row>=getNumRows())return;const auto [i,id]=rows[static_cast<size_t>(row)];
+    for(const auto& clip:engine.track(i).midiClips)if(clip.id==id){if(selected)g.fillAll(line);g.setColour(juce::Colour(engine.track(i).colour));g.drawText(clip.name+" MIDI",8,1,w-12,h/2,juce::Justification::centredLeft);g.setColour(juce::Colour(0xff91a0b4));g.drawText(engine.track(i).name+" - "+juce::String(clip.notes.size())+" notas",8,h/2,w-12,h/2,juce::Justification::centredLeft);}
     for(const auto& r:engine.track(i).regions)if(r.id==id){if(selected){g.setColour(line);g.fillAll();}g.setColour(juce::Colour(engine.track(i).colour));g.setFont(12.0f);g.drawText(r.asset->name,8,1,w-12,h/2,juce::Justification::centredLeft);
         g.setColour(juce::Colour(0xff91a0b4));g.setFont(11.0f);g.drawText(engine.track(i).name+juce::String::fromUTF8(" · ")+juce::String(r.start,2)+"s",8,h/2,w-12,h/2,juce::Justification::centredLeft);}}
-void ClipPanel::listBoxItemClicked(int row,const juce::MouseEvent&){if(row<0||row>=getNumRows())return;const auto [i,id]=rows[static_cast<size_t>(row)];editor.select(i,id);if(auto* r=editor.selected())engine.seek(r->start);if(selected)selected();}
+void ClipPanel::listBoxItemClicked(int row,const juce::MouseEvent&){if(row<0||row>=getNumRows())return;const auto [i,id]=rows[static_cast<size_t>(row)];editor.select(i,id);if(auto* r=editor.selected())engine.seek(r->start);for(const auto& clip:engine.track(i).midiClips)if(clip.id==id)engine.seek(ticksToSeconds(clip.start,engine.bpm.load()));if(selected)selected();}
 }

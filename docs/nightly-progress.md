@@ -26,3 +26,19 @@
 - SMF e estado do modelo com roundtrip, overflow/panic e validação de metadados.
 - Builds Debug/Release aprovados, CTest 8/8 em ambos, 14 novas verificações.
 - Próximo: instrumento VST3 original gerando áudio e integração MIDI no grafo.
+
+## 2026-10-14 — Fase 4, integração e editor
+
+- Instrumento VST3 real, motor/loop/seek/metrônomo, live MIDI, roteamento de
+  dispositivos, captura com recuperação SMF e sessões v4 implementados.
+- Piano Roll implementado; UI Debug/Release inicial passou com Realtek e notas reais.
+- Última bateria antes dos ajustes finais: CTest 10/10 Debug e Release, 37 testes
+  de instrumento/motor/captura mais 14 de dados e 13 de concorrência MIDI.
+- Validando agora presets/CC/timestamps e últimos controles do editor.
+
+## 2026-10-14 — conclusão funcional da Fase 4
+
+- Versão 0.4.0: MIDI/Piano Roll/VST3i/SMF/metrônomo/entrada/captura e sessão v4.
+- Builds Debug/Release aprovados; CTest 10/10 em ambos, 410 verificações mais smoke.
+- UI com notas reais em Realtek passou; MIDI físico e terceiros permanecem pendentes.
+- Próxima etapa autorizada: gravação de áudio multipista, punch e takes (Fase 5).

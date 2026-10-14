@@ -6,8 +6,13 @@
 #include <vector>
 #include <thread>
 #include "MixProcessor.h"
+#include "Midi/MidiData.h"
+#include "Midi/MidiQueue.h"
 
 namespace nova {
+struct MidiIO;
+class MidiPort;
+class MidiRecorder;
 struct Peak { float low = 0, high = 0; };
 struct Clip {
     juce::File source;
@@ -19,6 +24,12 @@ struct Clip {
 };
 struct Track {
     bool auxiliary = false;
+    bool midiTrack = false;
+    std::vector<MidiClip> midiClips;
+    std::vector<MidiEvent> midiEvents;
+    std::unique_ptr<MixProcessor> instrument;
+    juce::String midiInput;
+    std::atomic<bool> midiArm{false};
     bool monoBus = false;
     std::shared_ptr<Clip> clip;
     struct Region {
@@ -44,9 +55,10 @@ struct Track {
     std::vector<AutomationLane> automation;
 };
 
-class AudioEngine final : public juce::AudioIODeviceCallback {
+class AudioEngine final : public juce::AudioIODeviceCallback, private juce::AudioPlayHead {
 public:
     AudioEngine();
+    ~AudioEngine() override;
     // Mutations have one control-thread owner. Render uses a single CAS and never waits.
     // The guard waits for an existing render to finish on the control thread only.
     class MutationGuard {
@@ -68,6 +80,20 @@ public:
     void recalculateMediaBytes();
     void clear();
     bool addAux(const juce::String&, bool mono, juce::String&);
+    bool addMidiTrack(const juce::String&,juce::String&);
+    bool rebuildMidi(int track,juce::String&);
+    void setTempo(double);
+    void setTimeSignature(int beats,int unit);
+    void setMidiInput(int track,const juce::String& identifier);
+    void synchronizeMidiInputs();
+    bool postMidi(int track,const juce::MidiMessage&,int sampleOffset=0,uint64_t device=0) noexcept;
+    void dispatchMidiDevice(uint64_t device,const juce::MidiMessage&) noexcept;
+    bool popCapturedMidi(CapturedMidiEvent&) noexcept;
+    uint64_t midiGeneration() const noexcept;
+    uint64_t midiInputDrops() const noexcept;
+    uint64_t midiCaptureDrops() const noexcept;
+    std::atomic<bool> midiRecording{false};
+    std::atomic<int64_t> midiRecordEndTick{0};
     bool setRoute(int source, int destination, juce::String&);
     bool setSend(int source, int slot, int destination, bool preFader, juce::String&);
     bool rebuildGraph(juce::String&);
@@ -89,16 +115,20 @@ public:
     void setLoop(double start, double end, bool enabled);
     std::atomic<bool> loopEnabled{false};
     std::atomic<double> loopStart{0}, loopEnd{0};
-    double bpm = 120;
+    std::atomic<double> bpm{120};
     int beatsPerBar = 4, beatUnit = 4;
+    std::atomic<bool> metronomeEnabled{false};
+    std::atomic<uint64_t> midiDroppedBlocks{0};
     void play() { playing.store(true); }
-    void pause() { playing.store(false); }
+    void pause();
     void stop() { pause(); seek(0); }
     void seek(double seconds); // control thread: plugin reset is quiesced, never called by render
     bool isPlaying() const { return playing.load(); }
     double position() const { return visiblePosition.load(); }
     void setOutputRate(double rate);
     void render(float* const* output, int channels, int frames) noexcept;
+    // Explicit monotonic clock for offline/simulated input timing; hardware uses render().
+    void renderAtTime(float* const* output,int channels,int frames,double monotonicSeconds) noexcept;
     std::atomic<float> masterGain{1}, masterPeak{0};
     std::atomic<float> masterRms{0};
     std::atomic<bool> masterClipped{false}, masterMute{false};
@@ -134,10 +164,24 @@ private:
     std::atomic<unsigned> processingGate{0};
     int mutationDepth = 0;
     DelayCompensation compensation;
+    std::unique_ptr<MidiIO> midiIO;
+    StereoDelay clickCompensation;
+    std::array<juce::MidiBuffer,maxTracks> scheduledMidi;
+    juce::MidiBuffer midiSpan;
+    std::array<bool,maxTracks> resumeMidi{};
+    std::array<double,maxTracks> lastMidiTime{};
+    std::atomic<double> playheadTime{0};
+    std::atomic<int> playheadBeats{4},playheadUnit{4};
+    double clickPhase=0;
+    int clickRemaining=0;
+    int64_t lastClickBeat=-1;
     std::atomic<bool> pdcReady{true};
     std::atomic<int> visibleLatency{0};
     juce::String configurationError;
     void renderBlock(float* const*, int channels, int offset, int frames) noexcept;
+    void scheduleTrackMidi(int track,int frames,int callbackOffset,bool active) noexcept;
+    void consumeMidiInput(int frames) noexcept;
+    juce::Optional<juce::AudioPlayHead::PositionInfo> getPosition() const override;
 };
 
 class AudioRuntime {
@@ -145,9 +189,11 @@ public:
     AudioEngine engine;
     juce::AudioDeviceManager devices;
     juce::String initialError;
+    std::unique_ptr<MidiRecorder> midiRecorder;
     AudioRuntime();
     ~AudioRuntime();
     void serviceMaintenance(); // message thread: rate/latency changes; never from callback
+    bool ensureMidiInput(const juce::String&,juce::String&);
     template<class F> void editStructure(F&& edit) {
         const bool resume = engine.isPlaying();
         engine.pause();
@@ -158,5 +204,7 @@ public:
         if (resume && engine.duration() > 0) engine.play();
     }
     juce::String deviceDescription() const;
+private:
+    std::vector<std::unique_ptr<MidiPort>> midiPorts;
 };
 }

@@ -1,4 +1,5 @@
 #include "Midi/MidiData.h"
+#include "Midi/MidiEditModel.h"
 #include <iostream>
 #include <stdexcept>
 #include <cstdlib>
@@ -29,5 +30,14 @@ int main(int argc,char** argv){try{
     expect(!nova::readMidiClip(bad,restored,error)&&restored.notes[0].channel==16,"invalid event size rejected without replacing valid MIDI clip");
     std::vector<nova::MidiEvent> dense(257,{0,{0x90,60,100},3});expect(!nova::scheduleMidi(dense,0,120,48000,64,events)&&events.getNumEvents()==16,"event overflow replaces oversized block with channel panic");
     auto trim=clip;trim.start=960;trim.offset=5;trim.length=5;trim.controls.clear();expect(nova::compileMidi({trim},compiled,error)&&compiled[0].tick==960&&compiled[1].tick==965,"non-destructive trim clips note edges in musical time");
+    nova::AudioEngine engine;engine.addMidiTrack("Edit",error);nova::MidiEditModel edit(engine,0);edit.snap=false;
+    expect(edit.addNote(73,60,200,100,1)&&edit.clip()->notes[0].tick==73,"piano model inserts unsnapped note with exact musical position");
+    expect(edit.moveSelected(24,2)&&edit.resizeSelected(40)&&edit.clip()->notes[0].tick==97&&edit.clip()->notes[0].pitch==62&&edit.clip()->notes[0].length==240,"piano move and resize alter actual MIDI event data");
+    expect(edit.setVelocity(64)&&edit.setChannel(16)&&edit.clip()->notes[0].velocity==64&&edit.clip()->notes[0].channel==16,"piano velocity and channel affect persisted notes");
+    edit.addNote(960,64,960,100,1);edit.selectAll();expect(edit.copy()&&edit.paste(1920)&&edit.clip()->notes.size()==4,"multi-note copy paste preserves relative musical spacing");
+    expect(edit.quantizeSelected()&&edit.clip()->notes.back().tick==2880,"quantization moves selected notes onto chosen grid");
+    expect(edit.eraseSelected()&&edit.clip()->notes.size()==2&&edit.undo()&&edit.clip()->notes.size()==4&&edit.redo()&&edit.clip()->notes.size()==2,"piano delete undo redo restore selected musical data");
+    expect(!edit.setClipTiming(400000000,20000000,0)&&edit.clip()->start==0&&edit.clip()->notes.size()==2,"invalid MIDI edit rolls back to prior clip and compiled events");
+    expect(edit.duplicateClip()&&engine.track(0).midiClips.size()==2&&edit.undo()&&engine.track(0).midiClips.size()==1,"clip duplication is non-destructive and undoable");
     std::cout<<checks<<" MIDI data checks passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<"FAIL: "<<e.what()<<'\n';return 1;}}

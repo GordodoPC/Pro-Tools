@@ -1,4 +1,4 @@
-# NOVA DAW — Fase 3.5 (0.3.0)
+# NOVA DAW — Fase 4 (0.4.0)
 
 Aplicativo desktop próprio para Windows em C++20/JUCE. Esta versão implementa
 Edit/Mix, importação WAV mono/estéreo, waveform real, reprodução simultânea,
@@ -7,9 +7,12 @@ A versão 0.2.0 adiciona edição não destrutiva de regiões, Undo/Redo,
 grade musical, painéis redimensionáveis, preferências e saída Master stereo/L/R.
 A versão 0.3.0 adiciona buses stereo/mono, sends pré/pós-fader, quatro inserts
 por canal/Master, VST3 stereo, cinco efeitos nativos e automação Read.
-Gravação, MIDI, ASIO, exportação e Write/Touch/Latch continuam pendentes.
+A Fase 4 adiciona faixas/clips MIDI, Piano Roll, instrumentos VST3, entrada e
+gravação MIDI, metrônomo e arquivos Standard MIDI File. Gravação de áudio,
+ASIO, bounce de áudio e Write/Touch/Latch continuam pendentes.
 A Fase 3.5 adiciona PDC e proteção do ciclo de vida/processamento VST3.
-Resultados atuais: [docs/phase3-stability-report.md](docs/phase3-stability-report.md);
+Resultados MIDI: [docs/phase4-report.md](docs/phase4-report.md).
+Estabilização: [docs/phase3-stability-report.md](docs/phase3-stability-report.md);
 histórico: [docs/phase3-report.md](docs/phase3-report.md).
 
 ## Compilar no Windows
@@ -112,7 +115,8 @@ Em janelas pequenas, use a rolagem da mesa para acessar todos os controles.
 Larguras, zoom, vista Edit/Mix e Snap são restaurados por
 `.nova-preferences.json`, local à pasta deste projeto.
 
-Sessões versão 3 guardam regiões, mixagem, nomes/cores/alturas, entrada, buses,
+Sessões versão 4 guardam também MIDI/instrumentos/entradas e preservam os dados
+antigos. Versões 1/2/3 continuam legíveis. A versão 3 guardava regiões, mixagem, nomes/cores/alturas, entrada, buses,
 roteamento, inserts, estado opaco VST3, sends, automação, tempo/loop e Master.
 Versões 1/2 continuam legíveis, com valores padrão para os novos recursos.
 A captura do estado de plugins ocorre com o callback desanexado.
@@ -186,3 +190,29 @@ O argumento aceita 10..3600 segundos. `stability-result.json` registra CPU,
 memória privada, duração do render, violações de prazo, alocações observadas
 e erros de controle. Esse teste usa um render agendado, sem dispositivo de
 áudio; audição física, ASIO, roundtrip e VST3 de terceiros exigem validação própria.
+
+## MIDI e Piano Roll
+
+Use **MIDI → Nova faixa MIDI**. No Piano Roll, selecione instrumento e entrada,
+clique no teclado para preview ou desenhe notas na grade. Arraste notas para
+mover e a borda direita para alterar duração. Shift seleciona várias notas;
+desative Desenhar para seleção por retângulo. Velocity/canal, Copy/Paste/Delete,
+Quantizar, Snap, zoom, Undo/Redo, início/duração/offset e duplicação são funcionais.
+Clips aparecem na timeline; duplo clique abre seu Piano Roll.
+
+O instrumento **NOVA Test Synth** é original e compilado no build com testes;
+nenhum VST3 é instalado globalmente. O scan local da fixture é iniciado na
+interface. Para outros instrumentos, adicione sua pasta e faça Scan VST3.
+Instruments aceitos: MIDI, saída stereo e zero entradas de áudio ativas.
+Interface, programas e presets .novapreset preservam o estado opaco.
+
+Arme a faixa e selecione sua entrada para **Record MIDI**. Também é possível
+gravar o teclado visual. Eventos são drenados fora do callback e cada take
+gera um .mid de recuperação em Recordings/MIDI. Parar, seek/mudança de tempo
+ou interrupção fecha o take; MIDI recebido é preservado. Não há mapa de tempo
+variável. Entrada física ainda precisa de validação no dispositivo do usuário.
+**Loop clip**, metrônomo, importação/exportação .mid e sessão v4 estão disponíveis.
+
+A validação **--validate-midi-ui "pasta"** exercita gestos/controles, áudio real
+da fixture no callback de saída e save/reopen MIDI. Ela não testa dispositivo
+MIDI físico nem instrumento de terceiros.

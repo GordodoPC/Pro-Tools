@@ -1,4 +1,6 @@
 #include "AudioEngine.h"
+#include "Midi/MidiIO.h"
+#include "Midi/MidiRuntime.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -67,7 +69,7 @@ bool AudioEngine::addSharedClip(std::shared_ptr<Clip> clip, juce::String& error)
         error = "Limite: 64 faixas e 512 MiB de audio decodificado por sessao."; return false;
     }
     auto& t = tracks[static_cast<size_t>(count++)];
-    t.auxiliary=false;t.monoBus=false;t.outputTarget=-1;t.inputGain=1;t.rms=0;t.clipped=false;t.automation.clear();t.automationMode=AutomationMode::off;
+    t.auxiliary=false;t.midiTrack=false;t.midiClips.clear();t.midiEvents.clear();t.instrument.reset();t.midiInput.clear();t.midiArm=false;t.monoBus=false;t.outputTarget=-1;t.inputGain=1;t.rms=0;t.clipped=false;t.automation.clear();t.automationMode=AutomationMode::off;
     for(auto& p:t.inserts)p.reset();for(auto& send:t.sends){send.target=-1;send.gain=0;send.preFader=false;}
     t.clip = std::move(clip); t.gain = 1; t.pan = 0; t.mute = false; t.solo = false; t.peak = 0;
     t.name = t.clip->name; t.height = 140; t.outputMode = 0;
@@ -77,16 +79,17 @@ bool AudioEngine::addSharedClip(std::shared_ptr<Clip> clip, juce::String& error)
     if(!rebuildGraph(error)){--count;bytes-=clipBytes;t.regions.clear();t.clip.reset();return false;}return true;
 }
 void AudioEngine::clear() {
-    MutationGuard mutation(*this);
+    MutationGuard mutation(*this);for(auto& route:midiIO->routes)route=0;++midiIO->generation;midiRecording=false;
     stop();
-    for (auto& t : tracks) { t.regions.clear(); t.clip.reset();for(auto& p:t.inserts)p.reset();t.automation.clear(); }
+    for (auto& t : tracks) { t.regions.clear(); t.clip.reset();for(auto& p:t.inserts)p.reset();t.instrument.reset();t.midiClips.clear();t.midiEvents.clear();t.midiTrack=false;t.midiArm=false;t.automation.clear(); }
     for(auto& p:masterInserts)p.reset();masterMute=false;masterClipped=false;masterPeak=masterRms=0;smoothingInitialized=false;
     count = 0; bytes = 0; masterGain = 1;compensation={};visibleLatency=0;pdcReady=true;configurationError.clear();
     loopEnabled = false; loopStart = 0; loopEnd = 0; bpm = 120; beatsPerBar = beatUnit = 4;
 }
 double AudioEngine::duration() const {
     double end = 0;
-    for (int i = 0; i < count; ++i) for (const auto& region : tracks[static_cast<size_t>(i)].regions) end = std::max(end, region.end());
+    for (int i = 0; i < count; ++i) {for (const auto& region : tracks[static_cast<size_t>(i)].regions) end = std::max(end, region.end());
+        for(const auto& clip:track(i).midiClips)end=std::max(end,ticksToSeconds(clip.start+clip.length,bpm.load()));}
     return end;
 }
 void AudioEngine::setLoop(double start, double end, bool enabled) {
@@ -99,8 +102,9 @@ void AudioEngine::setLoop(double start, double end, bool enabled) {
 void AudioEngine::seek(double seconds) {
     MutationGuard mutation(*this);
     if (!std::isfinite(seconds)) return;
+    midiRecording=false;midiIO->pendingCount=0;LiveMidiEvent discarded;for(int i=0;i<2048&&midiIO->incoming.tryPop(discarded);++i){}
     const double value = std::clamp(seconds, 0.0, duration());
-    for(int i=0;i<count;++i)for(auto& insert:track(i).inserts)if(insert)insert->reset();
+    for(int i=0;i<count;++i){if(track(i).instrument)track(i).instrument->reset();for(auto& insert:track(i).inserts)if(insert)insert->reset();}
     for(auto& insert:masterInserts)if(insert)insert->reset();
     requestedPosition.store(value, std::memory_order_relaxed);
     visiblePosition.store(value);
@@ -111,9 +115,12 @@ AudioEngine::MutationGuard::MutationGuard(AudioEngine& e):engine(e){
         while((engine.processingGate.load(std::memory_order_acquire)&1)!=0)std::this_thread::yield();}
 }
 AudioEngine::MutationGuard::~MutationGuard(){if(--engine.mutationDepth==0)engine.processingGate.fetch_and(~2u,std::memory_order_release);}
+AudioEngine::~AudioEngine()=default;
+void AudioEngine::pause(){playing=false;midiRecording=false;midiIO->panic=true;}
 AudioEngine::AudioEngine() {
+    midiIO=std::make_unique<MidiIO>();
     for(auto& buffer:channelBuffers)buffer.setSize(2,mixBlockSize);
-    masterBuffer.setSize(2,mixBlockSize);setSmoothingTime(smoothingTime);
+    masterBuffer.setSize(2,mixBlockSize);for(auto& buffer:scheduledMidi)buffer.ensureSize(8192);midiSpan.ensureSize(8192);lastMidiTime.fill(-1);setSmoothingTime(smoothingTime);
 }
 void AudioEngine::setSmoothingTime(double seconds) {
     MutationGuard mutation(*this);
@@ -130,21 +137,23 @@ void AudioEngine::setOutputRate(double rate) {
 void AudioEngine::prepareProcessors() {
     MutationGuard mutation(*this);
     try{
-        for(int i=0;i<count;++i)for(auto& insert:track(i).inserts)if(insert)insert->prepare(outputRate);
-        for(auto& insert:masterInserts)if(insert)insert->prepare(outputRate);
+        playheadBeats=beatsPerBar;playheadUnit=beatUnit;
+        for(int i=0;i<count;++i){if(auto& instrument=track(i).instrument){instrument->prepare(outputRate);if(instrument->plugin)instrument->plugin->setPlayHead(this);}
+            for(auto& insert:track(i).inserts)if(insert){insert->prepare(outputRate);if(insert->plugin)insert->plugin->setPlayHead(this);}}
+        for(auto& insert:masterInserts)if(insert){insert->prepare(outputRate);if(insert->plugin)insert->plugin->setPlayHead(this);}
         juce::String error;if(!rebuildGraph(error)){configurationError=error;pdcReady=false;}
     }catch(const std::exception& ex){configurationError="Falha ao preparar processamento: "+juce::String(ex.what());pdcReady=false;}
 }
 bool AudioEngine::needsMaintenance()const {
     if(requestedDeviceRate.load()!=outputRate.load())return true;
-    for(int i=0;i<count;++i)for(const auto& insert:track(i).inserts)if(insert && insert->latencyChanged())return true;
+    for(int i=0;i<count;++i){if(track(i).instrument&&track(i).instrument->latencyChanged())return true;for(const auto& insert:track(i).inserts)if(insert && insert->latencyChanged())return true;}
     for(const auto& insert:masterInserts)if(insert && insert->latencyChanged())return true;return false;
 }
 uint64_t AudioEngine::contentionDropouts()const {
-    uint64_t total=0;for(int i=0;i<count;++i)for(const auto& insert:track(i).inserts)if(insert)total+=insert->contentionDropouts();
+    uint64_t total=0;for(int i=0;i<count;++i){if(track(i).instrument)total+=track(i).instrument->contentionDropouts();for(const auto& insert:track(i).inserts)if(insert)total+=insert->contentionDropouts();}
     for(const auto& insert:masterInserts)if(insert)total+=insert->contentionDropouts();return total;
 }
-void AudioEngine::closeEditors(){MutationGuard mutation(*this);for(int i=0;i<count;++i)for(auto& p:track(i).inserts)if(p)p->closeEditor();for(auto& p:masterInserts)if(p)p->closeEditor();}
+void AudioEngine::closeEditors(){MutationGuard mutation(*this);for(int i=0;i<count;++i){if(track(i).instrument)track(i).instrument->closeEditor();for(auto& p:track(i).inserts)if(p)p->closeEditor();}for(auto& p:masterInserts)if(p)p->closeEditor();}
 void AudioEngine::replaceSession(AudioEngine& other) {
     MutationGuard mutation(*this);
     clear();
@@ -152,14 +161,16 @@ void AudioEngine::replaceSession(AudioEngine& other) {
         dst.clip=std::move(src.clip);dst.regions=std::move(src.regions);dst.name=src.name;dst.colour=src.colour;dst.height=src.height;
         dst.gain=src.gain.load();dst.pan=src.pan.load();dst.mute=src.mute.load();dst.solo=src.solo.load();dst.outputMode=src.outputMode.load();
         dst.inputGain=src.inputGain.load();dst.outputTarget=src.outputTarget;dst.auxiliary=src.auxiliary;dst.monoBus=src.monoBus;
+        dst.midiTrack=src.midiTrack;dst.midiClips=std::move(src.midiClips);dst.midiEvents=std::move(src.midiEvents);dst.instrument=std::move(src.instrument);dst.midiInput=src.midiInput;dst.midiArm=src.midiArm.load();
         dst.peak=dst.rms=0;dst.clipped=false;dst.inserts=std::move(src.inserts);dst.automation=std::move(src.automation);dst.automationMode=src.automationMode;
         for(int j=0;j<2;++j){dst.sends[j].target=src.sends[j].target;dst.sends[j].preFader=src.sends[j].preFader;dst.sends[j].gain=src.sends[j].gain.load();}
     }
     count=other.count;bytes=other.bytes;nextRegionId=other.nextRegionId;processingOrder=other.processingOrder;
     masterGain=other.masterGain.load();masterMute=other.masterMute.load();masterInserts=std::move(other.masterInserts);
     compensation=std::move(other.compensation);visibleLatency=compensation.totalLatency;pdcReady=other.pdcReady.load();configurationError=other.configurationError;
-    bpm=other.bpm;beatsPerBar=other.beatsPerBar;beatUnit=other.beatUnit;
+    bpm=other.bpm.load();beatsPerBar=other.beatsPerBar;beatUnit=other.beatUnit;
     loopStart=other.loopStart.load();loopEnd=other.loopEnd.load();loopEnabled=other.loopEnabled.load();
+    metronomeEnabled=other.metronomeEnabled.load();resumeMidi.fill(true);lastMidiTime.fill(-1);synchronizeMidiInputs();prepareProcessors();
 }
 bool AudioEngine::addAux(const juce::String& name,bool mono,juce::String& error) {
     MutationGuard mutation(*this);
@@ -170,11 +181,12 @@ bool AudioEngine::addAux(const juce::String& name,bool mono,juce::String& error)
 bool AudioEngine::rebuildGraph(juce::String& error) {
     MutationGuard mutation(*this);
     std::vector<PdcNode> nodes;nodes.reserve(static_cast<size_t>(count));
-    for(int i=0;i<count;++i){const auto& t=track(i);int latency=0;for(const auto& insert:t.inserts)if(insert)latency+=insert->latencySamples();
+    for(int i=0;i<count;++i){const auto& t=track(i);int latency=t.instrument?t.instrument->latencySamples():0;for(const auto& insert:t.inserts)if(insert)latency+=insert->latencySamples();
         nodes.push_back({t.auxiliary,t.outputTarget,latency,{t.sends[0].target,t.sends[1].target}});}
     int masterLatency=0;for(const auto& insert:masterInserts)if(insert)masterLatency+=insert->latencySamples();
     DelayCompensation candidate;if(!candidate.build(nodes,masterLatency,error))return false;
-    compensation=std::move(candidate);processingOrder=compensation.order;visibleLatency=compensation.totalLatency;pdcReady=true;configurationError.clear();return true;
+    StereoDelay click;try{click.prepare(candidate.masterInputLatency);}catch(const std::bad_alloc&){error="Memoria insuficiente para metronomo/PDC.";return false;}
+    clickCompensation=std::move(click);compensation=std::move(candidate);processingOrder=compensation.order;visibleLatency=compensation.totalLatency;pdcReady=true;configurationError.clear();return true;
 }
 bool AudioEngine::setRoute(int source,int destination,juce::String& error) {
     MutationGuard mutation(*this);
@@ -188,29 +200,37 @@ bool AudioEngine::setSend(int source,int slot,int destination,bool pre,juce::Str
     if(rebuildGraph(error))return true;send.target=old;send.preFader=oldPre;return false;
 }
 void AudioEngine::render(float* const* output,int channels,int frames) noexcept {
+    renderAtTime(output,channels,frames,-1);
+}
+void AudioEngine::renderAtTime(float* const* output,int channels,int frames,double monotonicSeconds) noexcept {
     if(!output || channels<1 || frames<1)return;
     for(int c=0;c<channels;++c)if(output[c])std::fill_n(output[c],frames,0.0f);
     unsigned expected=0;if(!processingGate.compare_exchange_strong(expected,1,std::memory_order_acquire))return;
     struct Release {std::atomic<unsigned>& gate;~Release(){gate.fetch_sub(1,std::memory_order_release);}} release{processingGate};
     // A rate/latency transition is serviced off-thread; emit silence instead of misaligned audio.
+    midiIO->clockSequence.fetch_add(1,std::memory_order_acq_rel);midiIO->renderWallTime=std::isfinite(monotonicSeconds)&&monotonicSeconds>=0?monotonicSeconds:juce::Time::getMillisecondCounterHiRes()*0.001;midiIO->clockFrames=frames;midiIO->clockRate=sampleRate();midiIO->clockSequence.fetch_add(1,std::memory_order_release);
     if(!pdcReady.load() || needsMaintenance())return;
     const auto generation=seekGeneration.load(std::memory_order_acquire);
-    if(generation!=consumedSeek){renderPosition=requestedPosition.load(std::memory_order_relaxed);consumedSeek=generation;seekOrigin=renderPosition;elapsedSinceSeek=0;compensation.reset();
+    if(generation!=consumedSeek){renderPosition=requestedPosition.load(std::memory_order_relaxed);consumedSeek=generation;seekOrigin=renderPosition;elapsedSinceSeek=0;compensation.reset();resumeMidi.fill(true);lastMidiTime.fill(-1);lastClickBeat=-1;clickRemaining=0;clickCompensation.reset();
         // Seeking resets native tails. VST3 reset is a lifecycle operation and stays off the callback.
         for(int i=0;i<count;++i)for(auto& p:track(i).inserts)if(p)p->reset(false);for(auto& p:masterInserts)if(p)p->reset(false);}
-    if(!playing){masterPeak=masterRms=0;for(int i=0;i<count;++i)track(i).peak=track(i).rms=0;return;}
+    consumeMidiInput(frames);bool liveScene=false;for(int i=0;i<count;++i)liveScene|=track(i).midiTrack;
+    if(!playing&&!liveScene){masterPeak=masterRms=0;for(int i=0;i<count;++i)track(i).peak=track(i).rms=0;return;}
     float masterEnergy=0,masterMaximum=0;std::array<float,maxTracks> channelEnergy{},channelMaximum{};
     for(int offset=0;offset<frames;offset+=mixBlockSize){const int size=std::min(mixBlockSize,frames-offset);renderBlock(output,channels,offset,size);
         masterEnergy+=blockMasterRms*blockMasterRms*size;masterMaximum=std::max(masterMaximum,blockMasterPeak);
-        for(int i=0;i<count;++i){channelEnergy[i]+=blockRms[i]*blockRms[i]*size;channelMaximum[i]=std::max(channelMaximum[i],blockPeaks[i]);}}
+        for(int i=0;i<count;++i){channelEnergy[i]+=blockRms[i]*blockRms[i]*size;channelMaximum[i]=std::max(channelMaximum[i],blockPeaks[i]);}
+        if(!playing&&!liveScene)break;}
     // Publish meters after the full callback; UI readers never see an intermediate clear.
     masterPeak=masterMaximum;masterRms=std::sqrt(masterEnergy/frames);for(int i=0;i<count;++i){track(i).peak=channelMaximum[i];track(i).rms=std::sqrt(channelEnergy[i]/frames);}
-    visiblePosition=std::min(renderPosition,duration());
+    if(midiRecording)midiRecordEndTick=secondsToTicks(renderPosition,bpm.load());
+    visiblePosition=midiRecording||(liveScene&&!playing)?renderPosition:std::min(renderPosition,duration());
 }
 void AudioEngine::renderBlock(float* const* output,int channels,int offset,int frames) noexcept {
-    const double rate=outputRate.load();const double end=duration(),ls=loopStart.load(),le=loopEnd.load();
-    const bool looping=loopEnabled.load()&&le>ls&&ls>=0&&le<=end+1e-8;
-    auto timeAt=[&](int frame){const double t=renderPosition+frame/rate;return looping&&t>=le?ls+std::fmod(t-ls,le-ls):t;};
+    const bool active=playing.load();if(midiIO->panic.exchange(false))resumeMidi.fill(true);
+    const double rate=outputRate.load();playheadTime=renderPosition;const double end=duration(),ls=loopStart.load(),le=loopEnd.load();
+    const bool looping=active&&loopEnabled.load()&&le>ls&&ls>=0&&le<=end+1e-8;
+    auto timeAt=[&](int frame){const double t=renderPosition+(active?frame/rate:0);return looping&&t>=le?ls+std::fmod(t-ls,le-ls):t;};
     auto automationTime=[&](int frame,int latency){const double t=seekOrigin+(elapsedSinceSeek+frame-latency)/rate;
         return looping && t>=le?ls+std::fmod(t-ls,le-ls):t;};
     bool anySolo=false;std::array<bool,maxTracks> audible{},sourceSolo{},required{};
@@ -229,12 +249,13 @@ void AudioEngine::renderBlock(float* const* output,int channels,int offset,int f
         const float input=std::clamp(t.inputGain.load(),0.0f,16.0f);
         if(!smoothingInitialized){smoothGain[i].setCurrentAndTargetValue(t.gain.load());smoothPan[i].setCurrentAndTargetValue(t.pan.load());smoothInput[i].setCurrentAndTargetValue(input);smoothAudible[i].setCurrentAndTargetValue(audible[i]?1.0f:0.0f);for(int j=0;j<2;++j)smoothSend[i][j].setCurrentAndTargetValue(t.sends[j].gain.load());}
         smoothInput[i].setTargetValue(input);smoothAudible[i].setTargetValue(audible[i]?1.0f:0.0f);
+        if(t.midiTrack){scheduleTrackMidi(i,frames,offset,active);if(t.instrument)t.instrument->process(buffer,frames,&scheduledMidi[i]);}
         std::array<float,mixBlockSize> audibility{};for(int s=0;s<frames;++s)audibility[s]=smoothAudible[i].getNextValue();
         for(int s=0;s<frames;++s){const double time=timeAt(s);float pan=t.pan.load();
-            if(t.automationMode==AutomationMode::read)for(const auto& lane:t.automation){if(lane.target==-2)pan=lane.evaluate(automationTime(s,compensation.inputLatency[i]),pan);}
+            if(t.automationMode==AutomationMode::read)for(const auto& lane:t.automation){if(lane.target==-2)pan=lane.evaluate(automationTime(s,compensation.inputLatency[i]+(t.instrument?t.instrument->latencySamples():0)),pan);}
             smoothPan[i].setTargetValue(std::clamp(pan,-1.0f,1.0f));
             const float p=smoothPan[i].getNextValue();const float in=smoothInput[i].getNextValue();
-            if(!t.auxiliary)for(const auto& region:t.regions){
+            if(active&&!t.auxiliary&&!t.midiTrack)for(const auto& region:t.regions){
                 if(!region.asset || time<region.start || time>=region.end())continue;const auto& clip=*region.asset;
                 const double pos=(time-region.start+region.offset)*clip.sampleRate;
                 if(pos<0 || pos>=clip.samples.getNumSamples())continue;
@@ -244,14 +265,14 @@ void AudioEngine::renderBlock(float* const* output,int channels,int offset,int f
                 const auto* l=clip.samples.getReadPointer(0);const auto* r=clip.samples.getReadPointer(mono?0:1);
                 buffer.addSample(0,s,(l[a]+(l[b]-l[a])*frac)*lg);buffer.addSample(1,s,(r[a]+(r[b]-r[a])*frac)*rg);
             }
-            if(t.auxiliary){if(t.monoBus){const float m=(buffer.getSample(0,s)+buffer.getSample(1,s))*0.5f;buffer.setSample(0,s,m);buffer.setSample(1,s,m);}
+            if(t.auxiliary||t.midiTrack){if(t.monoBus){const float m=(buffer.getSample(0,s)+buffer.getSample(1,s))*0.5f;buffer.setSample(0,s,m);buffer.setSample(1,s,m);}
                 buffer.setSample(0,s,buffer.getSample(0,s)*(p>0?1-p:1));buffer.setSample(1,s,buffer.getSample(1,s)*(p<0?1+p:1));}
             for(int c=0;c<2;++c)buffer.setSample(c,s,buffer.getSample(c,s)*in);
         }
         // Parameter Read uses 16-sample segments; volume/pan interpolate each sample.
         const bool parameterAutomation=t.automationMode==AutomationMode::read && std::any_of(t.automation.begin(),t.automation.end(),[](const auto& lane){return lane.target>=0;});
         if(parameterAutomation){
-            for(int s=0;s<frames;s+=16){int arrival=compensation.inputLatency[i];
+            for(int s=0;s<frames;s+=16){int arrival=compensation.inputLatency[i]+(t.instrument?t.instrument->latencySamples():0);
                 float* ptr[]{buffer.getWritePointer(0)+s,buffer.getWritePointer(1)+s};juce::AudioBuffer<float> segment(ptr,2,std::min(16,frames-s));
                 for(int slot=0;slot<4;++slot)if(auto& insert=t.inserts[slot]){
                     for(const auto& lane:t.automation)if(lane.target==slot)insert->setParameter(lane.parameter,lane.evaluate(automationTime(s,arrival),insert->parameter(lane.parameter)));
@@ -271,17 +292,101 @@ void AudioEngine::renderBlock(float* const* output,int channels,int offset,int f
             destination.addSample(0,s,values[0]);destination.addSample(1,s,values[1]);}
         blockPeaks[i]=peaks[i];blockRms[i]=std::sqrt(squares[i]/(frames*2));if(peaks[i]>1)t.clipped=true;
     }
+    if(active&&metronomeEnabled){const double beatSeconds=60/bpm.load()*(4.0/beatUnit);
+        for(int sample=0;sample<frames;++sample){const auto beat=static_cast<int64_t>(std::floor((timeAt(sample)+1e-9)/beatSeconds));
+            if(beat!=lastClickBeat){lastClickBeat=beat;clickRemaining=int(rate*0.02);clickPhase=0;}
+            if(clickRemaining>0){const double frequency=beat%beatsPerBar==0?1600:1000;const float value=float(std::sin(clickPhase))*0.12f*float(clickRemaining)/(rate*0.02);
+                clickPhase+=juce::MathConstants<double>::twoPi*frequency/rate;--clickRemaining;const auto delayed=clickCompensation.process(value,value);masterBuffer.addSample(0,sample,delayed[0]);masterBuffer.addSample(1,sample,delayed[1]);}
+            else{const auto delayed=clickCompensation.process(0,0);masterBuffer.addSample(0,sample,delayed[0]);masterBuffer.addSample(1,sample,delayed[1]);}}}
     for(auto& insert:masterInserts)if(insert)insert->process(masterBuffer,frames);
     if(!smoothingInitialized){smoothMaster.setCurrentAndTargetValue(masterGain.load());smoothMasterAudible.setCurrentAndTargetValue(masterMute?0.0f:1.0f);}smoothingInitialized=true;smoothMaster.setTargetValue(std::clamp(masterGain.load(),0.0f,2.0f));
     smoothMasterAudible.setTargetValue(masterMute?0.0f:1.0f);
     float peak=0,square=0;
     for(int s=0;s<frames;++s){const float gain=smoothMaster.getNextValue()*smoothMasterAudible.getNextValue();float values[2]{};
-        for(int c=0;c<2;++c){float v=masterBuffer.getSample(c,s)*gain;if(!std::isfinite(v) || (!looping && timeAt(s)>=end+compensation.totalLatency/rate))v=0;peak=std::max(peak,std::abs(v));square+=v*v;values[c]=v;}
+        for(int c=0;c<2;++c){float v=masterBuffer.getSample(c,s)*gain;if(!std::isfinite(v) || (active&&!midiRecording&&!looping && timeAt(s)>=end+compensation.totalLatency/rate))v=0;peak=std::max(peak,std::abs(v));square+=v*v;values[c]=v;}
         if(channels==1){if(output[0])output[0][offset+s]=std::clamp((values[0]+values[1])*0.5f,-1.0f,1.0f);}
         else for(int c=0;c<2;++c)if(output[c])output[c][offset+s]=std::clamp(values[c],-1.0f,1.0f);
     }
     blockMasterPeak=peak;blockMasterRms=std::sqrt(square/(2*frames));if(peak>1)masterClipped=true;
-    renderPosition=timeAt(frames);elapsedSinceSeek+=frames;if(!looping && renderPosition>=end+compensation.totalLatency/rate){renderPosition=end;playing=false;}
+    if(active){renderPosition=timeAt(frames);elapsedSinceSeek+=frames;if(!midiRecording&&!looping && renderPosition>=end+compensation.totalLatency/rate){renderPosition=end;playing=false;midiIO->panic=true;}}
+}
+bool AudioEngine::addMidiTrack(const juce::String& name,juce::String& error){
+    MutationGuard mutation(*this);auto clip=std::make_unique<Clip>();clip->name=name;clip->samples.setSize(2,1);clip->samples.clear();
+    if(!addClip(std::move(clip),error))return false;auto& t=track(count-1);t.regions.clear();t.midiTrack=true;
+    MidiClip midi;midi.id=newRegionId();midi.length=midiPpq*16;t.midiClips.push_back(std::move(midi));resumeMidi[count-1]=true;lastMidiTime[count-1]=-1;synchronizeMidiInputs();return rebuildMidi(count-1,error);
+}
+bool AudioEngine::rebuildMidi(int index,juce::String& error){
+    MutationGuard mutation(*this);if(index<0||index>=count||!track(index).midiTrack){error="Faixa MIDI inexistente.";return false;}
+    if(!compileMidi(track(index).midiClips,track(index).midiEvents,error))return false;resumeMidi[index]=true;return true;
+}
+void AudioEngine::setTempo(double value){if(!std::isfinite(value)||value<30||value>300)return;MutationGuard mutation(*this);bpm=value;bool musical=false;for(int i=0;i<count;++i)musical|=track(i).midiTrack;if(musical)seek(position());}
+void AudioEngine::setTimeSignature(int beats,int unit){if(beats<1||beats>12||(unit!=4&&unit!=8))return;MutationGuard mutation(*this);beatsPerBar=beats;beatUnit=unit;playheadBeats=beats;playheadUnit=unit;lastClickBeat=-1;}
+juce::Optional<juce::AudioPlayHead::PositionInfo> AudioEngine::getPosition()const{
+    PositionInfo info;const double seconds=playheadTime.load(),tempo=bpm.load();const double ppq=seconds*tempo/60;
+    info.setTimeInSeconds(seconds);info.setTimeInSamples(std::llround(seconds*sampleRate()));info.setBpm(tempo);info.setPpqPosition(ppq);
+    const int beats=playheadBeats.load(),unit=playheadUnit.load();info.setTimeSignature(TimeSignature{beats,unit});info.setPpqPositionOfLastBarStart(std::floor(ppq/(beats*4.0/unit))*(beats*4.0/unit));
+    info.setIsPlaying(isPlaying());info.setIsLooping(loopEnabled.load());return info;
+}
+void AudioEngine::scheduleTrackMidi(int index,int frames,int callbackOffset,bool active)noexcept{
+    auto& output=scheduledMidi[index];output.clear();auto& t=track(index);const double rate=sampleRate(),tempo=bpm.load();
+    const double ls=loopStart.load(),le=loopEnd.load();const bool looping=loopEnabled.load()&&le>ls;
+    bool overflow=false;auto append=[&](const void* data,int bytes,int offset){if(output.getNumEvents()>=maximumMidiEventsPerBlock){overflow=true;return;}output.addEvent(data,bytes,offset);};
+    if(!active){if(resumeMidi[index]){midiPanic(output);resumeMidi[index]=false;lastMidiTime[index]=-1;}}
+    int cursor=0;
+    while(active&&cursor<frames&&!overflow){const double unwrapped=renderPosition+cursor/rate;
+        const double now=looping&&unwrapped>=le?ls+std::fmod(unwrapped-ls,le-ls):unwrapped;
+        const bool resume=resumeMidi[index]||lastMidiTime[index]<0||now+1e-8<lastMidiTime[index];
+        if(resume){for(int channel=0;channel<16;++channel){const uint8_t bytes[]{uint8_t(0xb0+channel),123,0};append(bytes,3,cursor);}
+            const double tick=now*tempo*midiPpq/60;
+            for(const auto& clip:t.midiClips)for(const auto& note:clip.notes){const auto first=clip.start+std::max(note.tick,clip.offset)-clip.offset;
+                const auto last=clip.start+std::min(note.tick+note.length,clip.offset+clip.length)-clip.offset;
+                if(first<tick-1e-6&&last>tick+1e-6){const uint8_t bytes[]{uint8_t(0x90+note.channel-1),uint8_t(note.pitch),uint8_t(note.velocity)};append(bytes,3,cursor);}}
+            resumeMidi[index]=false;
+        }
+        const int span=looping?std::min(frames-cursor,std::max(1,int(std::ceil((le-now)*rate-1e-8)))):frames-cursor;
+        if(!scheduleMidi(t.midiEvents,now,tempo,rate,span,midiSpan))overflow=true;
+        for(const auto event:midiSpan)append(event.data,event.numBytes,cursor+event.samplePosition);
+        lastMidiTime[index]=now+(span-1)/rate;cursor+=span;
+    }
+    for(const auto event:midiIO->live[index])if(event.samplePosition>=callbackOffset&&event.samplePosition<callbackOffset+frames)append(event.data,event.numBytes,event.samplePosition-callbackOffset);
+    if(overflow){++midiDroppedBlocks;output.clear();midiPanic(output);}
+}
+void AudioEngine::setMidiInput(int index,const juce::String& identifier){
+    MutationGuard mutation(*this);if(index<0||index>=count||!track(index).midiTrack)return;track(index).midiInput=identifier;midiIO->routes[index]=midiDeviceToken(identifier);resumeMidi[index]=true;
+}
+void AudioEngine::synchronizeMidiInputs(){MutationGuard mutation(*this);for(int i=0;i<maxTracks;++i)midiIO->routes[i]=i<count&&track(i).midiTrack?midiDeviceToken(track(i).midiInput):0;}
+uint64_t AudioEngine::midiGeneration()const noexcept{return midiIO->generation.load();}
+uint64_t AudioEngine::midiInputDrops()const noexcept{return midiIO->droppedInput.load();}
+uint64_t AudioEngine::midiCaptureDrops()const noexcept{return midiIO->droppedCapture.load();}
+bool AudioEngine::postMidi(int index,const juce::MidiMessage& message,int offset,uint64_t device)noexcept{
+    const auto bytes=message.getRawDataSize();if(index<0||index>=maxTracks||bytes<2||bytes>3||message.getRawData()[0]<0x80||message.getRawData()[0]>=0xf0||message.getRawData()[1]>=128||(bytes==3&&message.getRawData()[2]>=128))return false;
+    LiveMidiEvent event;event.generation=midiIO->generation.load();event.device=device;event.track=index;event.sampleOffset=offset;event.size=uint8_t(bytes);std::copy_n(message.getRawData(),bytes,event.bytes.begin());
+    if(midiIO->incoming.tryPush(event))return true;++midiIO->droppedInput;midiIO->panic=true;return false;
+}
+void AudioEngine::dispatchMidiDevice(uint64_t device,const juce::MidiMessage& message)noexcept{
+    if(device==0)return;const auto generation=midiIO->generation.load();double target=-1;
+    const double timestamp=message.getTimeStamp(),now=juce::Time::getMillisecondCounterHiRes()*0.001;
+    if(std::isfinite(timestamp)&&timestamp>0&&std::abs(timestamp-now)<2){for(int attempt=0;attempt<2;++attempt){const auto sequence=midiIO->clockSequence.load(std::memory_order_acquire);if(sequence&1)continue;
+        const int frames=midiIO->clockFrames.load();const double rate=midiIO->clockRate.load();if(midiIO->clockSequence.load(std::memory_order_acquire)!=sequence)continue;if(frames>0&&rate>=100)target=timestamp+frames/rate;break;}}
+const auto size=message.getRawDataSize();if(size<2||size>3||message.getRawData()[0]<0x80||message.getRawData()[0]>=0xf0||message.getRawData()[1]>=128||(size==3&&message.getRawData()[2]>=128))return;
+    for(int i=0;i<maxTracks;++i)if(midiIO->routes[i].load()==device){LiveMidiEvent event;event.generation=generation;event.targetTime=target;event.device=device;event.track=i;event.size=uint8_t(size);std::copy_n(message.getRawData(),size,event.bytes.begin());
+        if(!midiIO->incoming.tryPush(event)){++midiIO->droppedInput;midiIO->panic=true;}}
+}
+bool AudioEngine::popCapturedMidi(CapturedMidiEvent& event)noexcept{return midiIO->captured.tryPop(event);}
+void AudioEngine::consumeMidiInput(int frames)noexcept{
+    for(auto& buffer:midiIO->live)buffer.clear();midiIO->overflow={};const auto generation=midiIO->generation.load();
+    const double wall=midiIO->renderWallTime.load(),rate=sampleRate();int retained=0;
+    auto accept=[&](LiveMidiEvent event){const int index=event.track;
+        if(event.generation!=generation||index<0||index>=count||!track(index).midiTrack||(event.device!=0&&midiIO->routes[index].load()!=event.device))return;
+        if(event.targetTime>=0){const auto offset=std::llround((event.targetTime-wall)*rate);if(offset>=frames){if(retained<2048)midiIO->pending[retained++]=event;else{++midiIO->droppedInput;midiIO->panic=true;}return;}event.sampleOffset=int(std::max<int64_t>(0,offset));}
+        auto& destination=midiIO->live[index];if(midiIO->overflow[index])return;
+        if(destination.getNumEvents()>=maximumMidiEventsPerBlock){destination.clear();midiPanic(destination);midiIO->overflow[index]=true;++midiIO->droppedInput;return;}
+        const int offset=std::clamp(event.sampleOffset,0,frames-1);destination.addEvent(event.bytes.data(),event.size,offset);
+        if(midiRecording&&playing&&track(index).midiArm){CapturedMidiEvent capture;capture.generation=generation;capture.track=index;capture.tick=secondsToTicks(renderPosition+offset/rate,bpm.load());capture.bytes=event.bytes;capture.size=event.size;
+            if(!midiIO->captured.tryPush(capture)){++midiIO->droppedCapture;midiRecording=false;midiIO->panic=true;}}
+    };
+    const int previous=midiIO->pendingCount;for(int i=0;i<previous;++i)accept(midiIO->pending[i]);
+    LiveMidiEvent event;for(int received=0;received<2048&&midiIO->incoming.tryPop(event);++received)accept(event);midiIO->pendingCount=retained;
 }
 void AudioEngine::audioDeviceIOCallbackWithContext(const float* const*, int,
     float* const* out, int channels, int samples, const juce::AudioIODeviceCallbackContext&) {
@@ -289,9 +394,13 @@ void AudioEngine::audioDeviceIOCallbackWithContext(const float* const*, int,
 }
 void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device) { requestedDeviceRate.store(device->getCurrentSampleRate()); }
 void AudioEngine::audioDeviceStopped() { pause(); }
-AudioRuntime::AudioRuntime() { initialError = devices.initialiseWithDefaultDevices(0, 2);if(auto* device=devices.getCurrentAudioDevice())engine.setOutputRate(device->getCurrentSampleRate()); devices.addAudioCallback(&engine); }
-void AudioRuntime::serviceMaintenance(){if(engine.needsMaintenance())editStructure([this]{if(auto* device=devices.getCurrentAudioDevice())engine.setOutputRate(device->getCurrentSampleRate());else engine.prepareProcessors();});}
-AudioRuntime::~AudioRuntime() { devices.removeAudioCallback(&engine); devices.closeAudioDevice(); }
+AudioRuntime::AudioRuntime() { midiRecorder=std::make_unique<MidiRecorder>(engine);initialError = devices.initialiseWithDefaultDevices(0, 2);if(auto* device=devices.getCurrentAudioDevice())engine.setOutputRate(device->getCurrentSampleRate()); devices.addAudioCallback(&engine); }
+void AudioRuntime::serviceMaintenance(){midiRecorder->service();if(engine.needsMaintenance())editStructure([this]{if(auto* device=devices.getCurrentAudioDevice())engine.setOutputRate(device->getCurrentSampleRate());else engine.prepareProcessors();});}
+AudioRuntime::~AudioRuntime() { midiPorts.clear();devices.removeAudioCallback(&engine);juce::String error;midiRecorder->stop(error);devices.closeAudioDevice(); }
+bool AudioRuntime::ensureMidiInput(const juce::String& identifier,juce::String& error){
+    if(identifier.isEmpty())return true;for(const auto& port:midiPorts)if(port->identifier==identifier)return true;
+    auto port=std::make_unique<MidiPort>(engine,identifier);if(!port->available()){error="Dispositivo MIDI indisponivel: "+identifier;return false;}midiPorts.push_back(std::move(port));return true;
+}
 juce::String AudioRuntime::deviceDescription() const {
     if (auto* device = devices.getCurrentAudioDevice())
         return device->getName() + " | " + juce::String(device->getCurrentSampleRate(), 0)

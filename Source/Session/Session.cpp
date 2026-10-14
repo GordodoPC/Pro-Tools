@@ -51,17 +51,19 @@ bool readMix(const juce::var& v,Track& t,double rate,juce::String& error){
 }
 bool Session::save(const juce::File& file, const AudioEngine& engine, juce::String& error) {
     auto root = std::make_unique<juce::DynamicObject>();
-    root->setProperty("format", "nova-daw-session"); root->setProperty("version", 3);
+    root->setProperty("format", "nova-daw-session"); root->setProperty("version", 4);root->setProperty("midiPpq",midiPpq);root->setProperty("metronome",engine.metronomeEnabled.load());
     root->setProperty("masterGain", engine.masterGain.load());
     root->setProperty("masterMute",engine.masterMute.load());root->setProperty("masterInserts",insertState(engine.masterInserts));
-    root->setProperty("bpm",engine.bpm); root->setProperty("beatsPerBar",engine.beatsPerBar); root->setProperty("beatUnit",engine.beatUnit);
+    root->setProperty("bpm",engine.bpm.load()); root->setProperty("beatsPerBar",engine.beatsPerBar); root->setProperty("beatUnit",engine.beatUnit);
     root->setProperty("loopEnabled",engine.loopEnabled.load()); root->setProperty("loopStart",engine.loopStart.load()); root->setProperty("loopEnd",engine.loopEnd.load());
     juce::Array<juce::var> rows;
     for (int i = 0; i < engine.trackCount(); ++i) {
         const auto& t = engine.track(i);
         auto row = std::make_unique<juce::DynamicObject>();
+        row->setProperty("midiTrack",t.midiTrack);row->setProperty("midiInput",t.midiInput);row->setProperty("midiArm",t.midiArm.load());row->setProperty("instrument",t.instrument?t.instrument->state():juce::var());
+        juce::Array<juce::var> midiClips;for(const auto& clip:t.midiClips)midiClips.add(midiClipState(clip));row->setProperty("midiClips",midiClips);
         row->setProperty("auxiliary",t.auxiliary);row->setProperty("monoBus",t.monoBus);row->setProperty("mix",mixState(t));
-        row->setProperty("file", t.auxiliary ? juce::String("@aux"):t.clip->source.getRelativePathFrom(file.getParentDirectory()));
+        row->setProperty("file", t.midiTrack?juce::String("@midi"):t.auxiliary ? juce::String("@aux"):t.clip->source.getRelativePathFrom(file.getParentDirectory()));
         row->setProperty("name", t.name); row->setProperty("gain", t.gain.load());
         row->setProperty("pan", t.pan.load()); row->setProperty("mute", t.mute.load()); row->setProperty("solo", t.solo.load());
         row->setProperty("colour",juce::String::toHexString(static_cast<int64_t>(t.colour)));
@@ -86,16 +88,17 @@ bool Session::load(const juce::File& file, AudioEngine& engine, juce::String& er
     if(file.getSize()>64LL*1024*1024){error="Sessao excede o limite de 64 MiB de metadados.";return false;}
     juce::var data;
     if (juce::JSON::parse(file.loadFileAsString(), data).failed() || !data.isObject()
-        || data["format"].toString() != "nova-daw-session" || !data["version"].isInt() || (int(data["version"])<1 || int(data["version"])>3)
+        || data["format"].toString() != "nova-daw-session" || !data["version"].isInt() || (int(data["version"])<1 || int(data["version"])>4)
         || !data["tracks"].isArray() || !numeric(data["masterGain"])) { error = "Sessao invalida ou versao nao suportada."; return false; }
     auto* rows = data["tracks"].getArray();
     if (rows->size() > AudioEngine::maxTracks) { error = "Sessao excede 64 faixas."; return false; }
-    const bool v2=int(data["version"])>=2,v3=int(data["version"])==3;
+    const bool v2=int(data["version"])>=2,v3=int(data["version"])>=3,v4=int(data["version"])>=4;
+    if(v4&&(!data["midiPpq"].isInt()||int(data["midiPpq"])!=midiPpq||!data["metronome"].isBool())){error="Relogio MIDI/metronomo invalido.";return false;}
     if(v2 && (!numeric(data["bpm"]) || !data["beatsPerBar"].isInt() || !data["beatUnit"].isInt()
         || !numeric(data["loopStart"]) || !numeric(data["loopEnd"]) || !data["loopEnabled"].isBool())) {
         error="Dados de tempo, compasso ou loop invalidos.";return false;
     }
-    struct Entry { std::shared_ptr<Clip> clip; float gain, pan; bool mute, solo; juce::String name; uint32_t colour; int height, route; std::vector<Track::Region> regions; };
+    struct Entry { std::shared_ptr<Clip> clip; float gain, pan; bool mute, solo; juce::String name; uint32_t colour; int height, route; std::vector<Track::Region> regions; bool midi=false;std::vector<MidiClip> midiClips; };
     std::vector<Entry> entries;
     int64_t total = 0;
     std::map<juce::String,std::shared_ptr<Clip>> assets;
@@ -124,8 +127,9 @@ bool Session::load(const juce::File& file, AudioEngine& engine, juce::String& er
             error = "Volume ou pan invalido."; return false;
         }
         std::shared_ptr<Clip> clip;
+        if(v4&&(!row["midiTrack"].isBool()||!row["midiArm"].isBool()||!row["midiInput"].isString()||row["midiInput"].toString().length()>256||!row["midiClips"].isArray()||row["midiClips"].size()>128)){error="Tipo/entrada MIDI invalida.";return false;}
         if(v3 && (!row["auxiliary"].isBool() || !row["monoBus"].isBool())){error="Tipo de canal invalido.";return false;}
-        if(v3 && bool(row["auxiliary"])) {clip=std::make_shared<Clip>();clip->name=row["name"].toString();clip->samples.setSize(2,1);clip->samples.clear();}
+        if(v3 && (bool(row["auxiliary"])||(v4&&bool(row["midiTrack"])))) {clip=std::make_shared<Clip>();clip->name=row["name"].toString();clip->samples.setSize(2,1);clip->samples.clear();}
         else clip=loadAsset(row["file"]);
         if (!clip) return false;
         Entry entry{clip,gain,pan,static_cast<bool>(row["mute"]),static_cast<bool>(row["solo"]),
@@ -148,9 +152,12 @@ bool Session::load(const juce::File& file, AudioEngine& engine, juce::String& er
                 entry.regions.push_back({0,asset,start,offset,length});
             }
         }else entry.regions.push_back({0,clip,0,0,clip->duration()});
+        if(v4){entry.midi=bool(row["midiTrack"]);for(const auto& item:*row["midiClips"].getArray()){MidiClip midi;if(!readMidiClip(item,midi,error))return false;
+                if(ticksToSeconds(midi.start+midi.length,bpm)>86400){error="Clip MIDI excede timeline de 24 h.";return false;}entry.midiClips.push_back(std::move(midi));}
+            if((entry.midi&&bool(row["auxiliary"]))||(!entry.midi&&(!entry.midiClips.empty()||!row["instrument"].isVoid()))||(entry.midi&&!entry.regions.empty())){error="Dados MIDI nao correspondem ao tipo de faixa.";return false;}}
         entries.push_back(std::move(entry));
     }
-    double end=0;for(const auto& entry:entries)for(const auto& r:entry.regions)end=std::max(end,r.end());
+    double end=0;for(const auto& entry:entries){for(const auto& r:entry.regions)end=std::max(end,r.end());for(const auto& midi:entry.midiClips)end=std::max(end,ticksToSeconds(midi.start+midi.length,bpm));}
     if(v2 && static_cast<bool>(data["loopEnabled"]) && (le<=ls || le>end+1e-8)){error="Loop fora da sessao.";return false;}
     auto candidate=std::make_unique<AudioEngine>();candidate->setOutputRate(engine.sampleRate());
     for (auto& entry : entries) {
@@ -159,15 +166,19 @@ bool Session::load(const juce::File& file, AudioEngine& engine, juce::String& er
         t.gain = entry.gain; t.pan = entry.pan; t.mute = entry.mute; t.solo = entry.solo;
         t.name=entry.name;t.colour=entry.colour;t.height=entry.height;t.outputMode=entry.route;
         t.regions=std::move(entry.regions);for(auto& r:t.regions)r.id=candidate->newRegionId();
+        t.midiTrack=entry.midi;t.midiClips=std::move(entry.midiClips);for(auto& midi:t.midiClips){midi.id=candidate->newRegionId();for(auto& note:midi.notes)note.id=candidate->newRegionId();}
+        if(t.midiTrack&&!candidate->rebuildMidi(candidate->trackCount()-1,error))return false;
     }
     candidate->recalculateMediaBytes();candidate->bpm=bpm;candidate->beatsPerBar=beats;candidate->beatUnit=unit;
     candidate->setLoop(ls,le,v2 && static_cast<bool>(data["loopEnabled"]));
-    candidate->masterGain=master;
+    candidate->masterGain=master;candidate->metronomeEnabled=v4&&bool(data["metronome"]);
     if(v3){if(!data["masterMute"].isBool() || !readInserts(data["masterInserts"],candidate->masterInserts,engine.sampleRate(),error))return false;
         candidate->masterMute=bool(data["masterMute"]);
         for(int i=0;i<rows->size();++i){auto& t=candidate->track(i);const auto& row=rows->getReference(i);t.auxiliary=bool(row["auxiliary"]);t.monoBus=bool(row["monoBus"]);
             if(t.auxiliary && !t.regions.empty()){error="Aux nao pode conter regioes WAV.";return false;}
-            if(!readMix(row["mix"],t,engine.sampleRate(),error))return false;}
+            if(!readMix(row["mix"],t,engine.sampleRate(),error))return false;
+            if(v4){t.midiInput=row["midiInput"].toString();t.midiArm=bool(row["midiArm"]);if(!row["instrument"].isVoid()){
+                t.instrument=MixProcessor::restore(row["instrument"],engine.sampleRate(),error);if(!t.instrument||!t.instrument->isInstrument()){error="Slot de instrumento MIDI invalido.";return false;}}}}
         if(!candidate->rebuildGraph(error))return false;
     }
     engine.replaceSession(*candidate);return true;
