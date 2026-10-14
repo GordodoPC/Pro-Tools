@@ -30,6 +30,9 @@ MainComponent::MainComponent()
     for (auto* child : std::initializer_list<juce::Component*>{&menu,&editButton,&mixButton,&importButton,&playButton,&pauseButton,&stopButton,&audioButton,&clock,&status,&masterLabel,&master,&zoom,&editView,&trackView,&mixView,&ruler,&clipPanel,&trackDivider,&clipDivider,&startButton,&loopButton,&snapButton,&undoButton,&redoButton,&toolBox,&gridBox,&signature,&verticalZoom,&tempo,&selectionLabel,&trackHeader,&toolLabel,&bpmLabel}) addAndMakeVisible(child);
     editView.setViewedComponent(&timeline, false); trackView.setViewedComponent(&trackPanel, false);
     mixView.setViewedComponent(&mixer, false);
+    mixer.onAddAux=[this](bool mono){juce::String error;bool ok=false;audio.editStructure([&]{ok=audio.engine.addAux("Aux "+juce::String(audio.engine.trackCount()+1),mono,error);});if(!ok)showError(error);else{dirty=true;editor.reset();refreshTracks();}};
+    mixer.onScanFolder=[this]{chooser=std::make_unique<juce::FileChooser>("Pasta de plugins VST3",juce::File{});chooser->launchAsync(juce::FileBrowserComponent::openMode|juce::FileBrowserComponent::canSelectDirectories,
+        [safe=juce::Component::SafePointer<MainComponent>(this)](const auto& c){if(safe && c.getResult().isDirectory())safe->mixer.scanPlugins(juce::FileSearchPath(c.getResult().getFullPathName()));});};
     trackView.setScrollBarsShown(false, false);
     editView.onScroll = [this](auto area) {
         trackView.setViewPosition(0, area.getY()); ruler.scrollX = area.getX(); ruler.repaint();
@@ -98,7 +101,7 @@ MainComponent::MainComponent()
     refreshTracks(); switchView(preferences.mix); setSize(1280, 800); startTimerHz(30);
 }
 MainComponent::~MainComponent() {
-    stopTimer(); if (validationStep < 0) preferences.save(preferencesFile);
+    stopTimer();mixer.closeEditors(); if (validationStep < 0) preferences.save(preferencesFile);
     editView.setViewedComponent(nullptr); trackView.setViewedComponent(nullptr); mixView.setViewedComponent(nullptr); setLookAndFeel(nullptr);
 }
 void MainComponent::paint(juce::Graphics& g) {
@@ -106,7 +109,7 @@ void MainComponent::paint(juce::Graphics& g) {
     g.setColour(accent); g.setFont(juce::Font(juce::FontOptions(22).withStyle("Bold")));
     g.drawText("NOVA", 16, 35, 100, 28, juce::Justification::centredLeft);
     g.setColour(juce::Colour(0xff94a3b8)); g.setFont(11.0f);
-    g.drawText("AUDIO WORKSTATION  /  FASE 2", 17, 64, 225, 20, juce::Justification::centredLeft);
+    g.drawText("AUDIO WORKSTATION  /  FASE 3", 17, 64, 225, 20, juce::Justification::centredLeft);
     meter(g, juce::Rectangle<float>(getWidth() - 220.0f, 109, 195, 5), audio.engine.masterPeak.load(), true);
 }
 void MainComponent::resized() {
@@ -228,6 +231,7 @@ void MainComponent::requestClose() {
 }
 bool MainComponent::openSession(const juce::File& file) {
     juce::String error; bool ok = false;
+    mixer.closeEditors();
     audio.editStructure([&] { ok = Session::load(file, audio.engine, error); });
     if (!ok) { showError(error); return false; }
     editor.reset(); currentSession = file; dirty = false; refreshTracks(); return true;
@@ -236,7 +240,8 @@ void MainComponent::saveSession(bool saveAs) {
     auto save = [safe = juce::Component::SafePointer<MainComponent>(this)](const juce::File& file) {
         if (!safe) return;
         juce::String error;
-        if (Session::save(file, safe->audio.engine, error)) { safe->currentSession = file; safe->dirty = false; }
+        bool ok=false;safe->audio.editStructure([&]{ok=Session::save(file,safe->audio.engine,error);});
+        if (ok) { safe->currentSession = file; safe->dirty = false; }
         else safe->showError(error);
     };
     if (!saveAs && currentSession != juce::File{}) { save(currentSession); return; }
@@ -265,7 +270,7 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String&) {
 }
 void MainComponent::menuItemSelected(int id, int) {
     if (id >=20 && id<=27) { editCommand(id); return; }
-    if (id == 1) confirmReplacement([this] { audio.editStructure([this] { audio.engine.clear(); }); editor.reset(); currentSession = {}; dirty = false; refreshTracks(); });
+    if (id == 1) confirmReplacement([this] { mixer.closeEditors(); audio.editStructure([this] { audio.engine.clear(); }); editor.reset(); currentSession = {}; dirty = false; refreshTracks(); });
     if (id == 2) chooseOpen(); if (id == 3) saveSession(false); if (id == 4) saveSession(true); if (id == 5) chooseImport();
     if (id == 6) { if (audio.engine.isPlaying()) pauseButton.onClick(); else playButton.onClick(); }
     if (id == 7) stopButton.onClick(); if (id == 8) switchView(false); if (id == 9) switchView(true); if (id == 10) audioButton.onClick();
@@ -328,7 +333,7 @@ bool MainComponent::validateEditor() {
     ok=ok && trackView.getViewPositionY()==editView.getViewPositionY() && ruler.scrollX==editView.getViewPositionX();
     editView.setViewPosition(0,0); toolBox.setSelectedId(1,juce::sendNotificationSync); audio.engine.stop();
     juce::String error; const auto saved=validationDirectory.getChildFile("edited-ui.novadaw");
-    ok=ok && Session::save(saved,audio.engine,error);
+    bool savedOk=false;audio.editStructure([&]{savedOk=Session::save(saved,audio.engine,error);});ok=ok && savedOk;
     if (ok) ok=openSession(saved) && audio.engine.track(0).regions.size()==2;
     editor.select(0, audio.engine.track(0).regions.front().id); refreshEdited();
     return ok;
@@ -345,10 +350,12 @@ void MainComponent::timerCallback() {
     if (validationStep == 0) {
         juce::Array<juce::File> sources;
         for (int i = 0; i < audio.engine.trackCount(); ++i) sources.add(audio.engine.track(i).clip->source);
-        audio.editStructure([this] { audio.engine.clear(); });
+        mixer.closeEditors(); audio.editStructure([this] { audio.engine.clear(); });
         importFiles(sources);
         validationImported = audio.engine.trackCount() >= 2;
-        validationControls = trackPanel.validateBindings() && mixer.validateBindings();
+        const bool editBindings=trackPanel.validateBindings(),mixBindings=mixer.validateBindings();
+        validationControls=editBindings&&mixBindings;
+        validationDirectory.createDirectory();validationDirectory.getChildFile("bindings.txt").replaceWithText("Edit="+juce::String(int(editBindings))+" Mix="+juce::String(int(mixBindings)));
         validationDirectory.createDirectory();
         validationEditing = validateEditor(); dirty = false;
         auto image = createComponentSnapshot(getLocalBounds());

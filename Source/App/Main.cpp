@@ -3,7 +3,7 @@ namespace nova {
 class Application final : public juce::JUCEApplication {
 public:
     const juce::String getApplicationName() override { return "NOVA DAW"; }
-    const juce::String getApplicationVersion() override { return "0.2.0"; }
+    const juce::String getApplicationVersion() override { return "0.3.0"; }
     bool moreThanOneInstanceAllowed() override { return false; }
     void initialise(const juce::String& args) override {
         auto component = std::make_unique<MainComponent>();

@@ -32,7 +32,7 @@ void EditModel::checkpoint() { past.push_back(capture()); if(past.size()>64) pas
 void EditModel::reset() { past.clear(); future.clear(); clipboard.reset(); select(-1,0); rangeStart=rangeEnd=0; }
 bool EditModel::move(double start, int destination) {
     auto* r=selected();
-    if (!r || !std::isfinite(start) || destination<0 || destination>=engine.trackCount()) return false;
+    if (!r || !std::isfinite(start) || destination<0 || destination>=engine.trackCount() || engine.track(destination).auxiliary) return false;
     if (destination!=selectedTrack && engine.track(destination).regions.size()>=AudioEngine::maxRegionsPerTrack) return false;
     start=std::max(0.0,start);
     if (start+r->length>86400) return false;
@@ -67,7 +67,7 @@ bool EditModel::erase() {
 }
 bool EditModel::copy() { if(auto* r=selected()){clipboard=*r;return true;} return false; }
 bool EditModel::paste(int track, double time) {
-    if(!clipboard || track<0 || track>=engine.trackCount() || !std::isfinite(time)
+    if(!clipboard || track<0 || track>=engine.trackCount() || engine.track(track).auxiliary || !std::isfinite(time)
         || engine.track(track).regions.size()>=AudioEngine::maxRegionsPerTrack || std::max(0.0,time)+clipboard->length>86400) return false;
     checkpoint(); auto r=*clipboard; r.id=engine.newRegionId(); r.start=std::max(0.0,time);
     selectedTrack=track; selectedRegion=r.id; engine.track(track).regions.push_back(std::move(r)); return true;

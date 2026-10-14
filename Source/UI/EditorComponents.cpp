@@ -15,7 +15,7 @@ TrackControls::TrackControls(AudioEngine& e,EditModel& ed,int i,bool v,ApplyEdit
     name.setEditable(false,true,false);name.setFont(juce::Font(juce::FontOptions(14).withStyle("Bold")));
     name.onTextChange=[this]{const auto text=name.getText();apply([this,text]{editor.rename(index,text);return true;});};
     gainLabel.setText("VOL dB",juce::dontSendNotification);panLabel.setText("PAN",juce::dontSendNotification);
-    input.setText("IN: gravacao pendente",juce::dontSendNotification);input.setFont(11.0f);
+    input.setText(engine.track(index).auxiliary?"IN: bus":"IN: regioes WAV",juce::dontSendNotification);input.setFont(11.0f);
     record.setEnabled(false);record.setTooltip("Record Arm pendente: o motor ainda nao grava.");
     gain.setRange(-60,6,0.1);gain.setDoubleClickReturnValue(true,0);
     gain.setSliderStyle(v?juce::Slider::LinearVertical:juce::Slider::LinearHorizontal);
@@ -31,7 +31,8 @@ TrackControls::TrackControls(AudioEngine& e,EditModel& ed,int i,bool v,ApplyEdit
     mute.onClick=[this,changed]{engine.track(index).mute=mute.getToggleState();changed();};
     solo.onClick=[this,changed]{engine.track(index).solo=solo.getToggleState();changed();};
     output.addItem("Master stereo",1);output.addItem("Master L",2);output.addItem("Master R",3);
-    output.onChange=[this,changed]{engine.track(index).outputMode=output.getSelectedId()-1;changed();};
+    for(int j=0;j<engine.trackCount();++j)if(j!=index && engine.track(j).auxiliary)output.addItem(engine.track(j).name,j+4);
+    output.onChange=[this]{const int id=output.getSelectedId();juce::String error;if(!apply([&,id]{if(!engine.setRoute(index,id<=3?-1:id-4,error))return false;engine.track(index).outputMode=id<=3?id-1:0;return true;}))juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Roteamento",error);};
     colour.onClick=[this]{
         juce::PopupMenu menu;const juce::StringArray labels{"Teal","Blue","Violet","Pink","Orange","Green"};
         for(int id=1;id<=6;++id)menu.addItem(id,labels[id-1]);
@@ -48,9 +49,9 @@ void TrackControls::refresh(){
     gain.setValue(juce::Decibels::gainToDecibels(t.gain.load(),-60.0f),juce::dontSendNotification);
     pan.setValue(t.pan.load(),juce::dontSendNotification);
     mute.setToggleState(t.mute.load(),juce::dontSendNotification);solo.setToggleState(t.solo.load(),juce::dontSendNotification);
-    output.setSelectedId(t.outputMode.load()+1,juce::dontSendNotification);repaint();
+    output.setSelectedId(t.outputTarget<0?t.outputMode.load()+1:t.outputTarget+4,juce::dontSendNotification);repaint();
 }
-bool TrackControls::validateBindings(){
+bool TrackControls::validateBindings(){refresh();
     auto& t=engine.track(index);const auto oldGain=t.gain.load(),oldPan=t.pan.load();const auto oldRoute=t.outputMode.load();const bool oldMute=t.mute.load(),oldSolo=t.solo.load();
     gain.setValue(-6,juce::sendNotificationSync);pan.setValue(1,juce::sendNotificationSync);
     mute.setToggleState(true,juce::sendNotificationSync);solo.setToggleState(true,juce::sendNotificationSync);output.setSelectedId(3,juce::sendNotificationSync);
@@ -164,20 +165,20 @@ void Ruler::paint(juce::Graphics& g){
     g.setColour(accent);g.drawVerticalLine(static_cast<int>(engine.position()*px)-scrollX,0,static_cast<float>(getHeight()));
 }
 void Ruler::mouseDown(const juce::MouseEvent& e){engine.seek(editor.quantize((e.x+scrollX)/timeline.pixelsPerSecond));}
-Mixer::Mixer(AudioEngine& e,EditModel& ed,ApplyEdit a):engine(e),editor(ed),apply(a){
-    addAndMakeVisible(master);addAndMakeVisible(masterName);masterName.setText("MASTER",juce::dontSendNotification);
-    master.setRange(-60,6,0.1);master.setSliderStyle(juce::Slider::LinearVertical);master.setTextBoxStyle(juce::Slider::TextBoxBelow,false,65,20);master.setDoubleClickReturnValue(true,0);
+Mixer::Mixer(AudioEngine& e,EditModel& ed,ApplyEdit a):engine(e),editor(ed),apply(a),catalog(juce::File(NOVA_PROJECT_ROOT).getChildFile(".nova-plugin-list.xml")){
+    for(auto* c:std::initializer_list<juce::Component*>{&addAux,&addMono,&scan,&scanFolder,&scanStatus})addAndMakeVisible(c);
+    addAux.onClick=[this]{if(onAddAux)onAddAux(false);};addMono.onClick=[this]{if(onAddAux)onAddAux(true);};
+    scan.onClick=[this]{juce::VST3PluginFormat format;catalog.scan(format.getDefaultLocationsToSearch());};
+    scanFolder.onClick=[this]{if(onScanFolder)onScanFolder();};
 }
-void Mixer::rebuild(std::function<void()> changed){controls.clear();for(int i=0;i<engine.trackCount();++i){auto c=std::make_unique<TrackControls>(engine,editor,i,true,apply,changed);addAndMakeVisible(*c);controls.push_back(std::move(c));}
-    master.onValueChange=[this,changed]{engine.masterGain=master.getValue()<=-60?0:juce::Decibels::decibelsToGain(static_cast<float>(master.getValue()));changed();};layoutChannels(getHeight());}
-void Mixer::layoutChannels(int height){const int h=std::max(510,height);setSize(std::max(1000,(engine.trackCount()+1)*158+20),h);
-    for(int i=0;i<engine.trackCount();++i)controls[static_cast<size_t>(i)]->setBounds(8+i*158,8,150,h-16);
-    const int x=8+engine.trackCount()*158;masterName.setBounds(x+12,16,120,28);master.setBounds(x+15,140,90,h-180);}
-void Mixer::refresh(){for(auto& c:controls)c->refresh();master.setValue(juce::Decibels::gainToDecibels(engine.masterGain.load(),-60.0f),juce::dontSendNotification);repaint();}
-void Mixer::paint(juce::Graphics& g){g.fillAll(bg);const int x=8+engine.trackCount()*158;g.setColour(panel);g.fillRoundedRectangle(x,8.0f,150,getHeight()-16.0f,4);
-    g.setColour(juce::Colour(0xff9daabd));g.setFont(12.0f);g.drawText("Stereo Out",x+12,50,120,25,juce::Justification::centredLeft);
-    g.drawText("PEAK "+juce::String(juce::Decibels::gainToDecibels(engine.masterPeak.load(),-90.0f),1)+" dB",x+12,83,130,25,juce::Justification::centredLeft);
-    meter(g,{x+125.0f,140,8,getHeight()-185.0f},engine.masterPeak.load(),false);}
+void Mixer::rebuild(std::function<void()> changed){controls.clear();for(int i=0;i<=engine.trackCount();++i){auto c=std::make_unique<ChannelStrip>(engine,editor,i==engine.trackCount()?-1:i,catalog,apply,changed);addAndMakeVisible(*c);controls.push_back(std::move(c));}layoutChannels(getHeight());}
+void Mixer::layoutChannels(int height){const int h=std::max(650,height);setSize(std::max(1000,(engine.trackCount()+1)*184+20),h);
+    addAux.setBounds(8,6,115,28);addMono.setBounds(129,6,115,28);scan.setBounds(250,6,115,28);scanFolder.setBounds(371,6,115,28);scanStatus.setBounds(495,6,490,28);
+    for(int i=0;i<int(controls.size());++i)controls[i]->setBounds(8+i*184,42,176,h-50);
+}
+void Mixer::refresh(){for(auto& c:controls)c->refresh();scanStatus.setText(catalog.status(),juce::dontSendNotification);scan.setEnabled(!catalog.scanning());scanFolder.setEnabled(!catalog.scanning());repaint();}
+void Mixer::closeEditors(){for(auto& c:controls)c->closeEditors();engine.closeEditors();}
+void Mixer::paint(juce::Graphics& g){g.fillAll(bg);}
 bool Mixer::validateBindings(){return !controls.empty()&&controls.front()->validateBindings();}
 ClipPanel::ClipPanel(AudioEngine& e,EditModel& ed):engine(e),editor(ed),list("Clips",this){addAndMakeVisible(list);list.setColour(juce::ListBox::backgroundColourId,bg);list.setRowHeight(46);}
 void ClipPanel::refresh(){rows.clear();for(int i=0;i<engine.trackCount();++i)for(const auto& r:engine.track(i).regions)rows.emplace_back(i,r.id);list.updateContent();list.repaint();}

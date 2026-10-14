@@ -48,7 +48,7 @@ int main(int argc, char** argv) {
         const juce::File dir(juce::String::fromUTF8(argv[1])); dir.createDirectory();
         const auto a = dir.getChildFile("track-a.wav"), b = dir.getChildFile("track-b.wav");
         writeWave(a,48000,0.1f,0.2f); writeWave(b,44100,0.05f,-0.1f);
-        nova::AudioEngine engine; engine.setOutputRate(48000); add(engine,a); add(engine,b);
+        nova::AudioEngine engine; engine.setSmoothingTime(0); engine.setOutputRate(48000); add(engine,a); add(engine,b);
         expect(engine.trackCount()==2,"two imported tracks");
         expect(near(engine.track(0).clip->waveform.front().high,0.2f),"waveform peak matches decoded WAV");
         engine.play(); auto out = render(engine);
@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
         juce::String error;
         const auto session=dir.getChildFile("roundtrip.novadaw");
         expect(nova::Session::save(session,engine,error),"save session");
-        nova::AudioEngine restored;
+        nova::AudioEngine restored; restored.setSmoothingTime(0);
         expect(nova::Session::load(session,restored,error),"open session");
         expect(restored.trackCount()==2 && restored.track(1).solo && near(restored.track(1).pan,1)
             && near(restored.masterGain,0.5f),"session persists files and mix controls");
@@ -91,17 +91,17 @@ int main(int argc, char** argv) {
         const auto corrupt=dir.getChildFile("corrupt.wav"); corrupt.replaceWithText("not audio");
         expect(nova::AudioEngine::loadWav(corrupt,error)==nullptr,"reject corrupt WAV");
         const auto mono=dir.getChildFile("mono.wav"); writeWave(mono,48000,0.1f,0,true,true);
-        nova::AudioEngine monoEngine; add(monoEngine,mono); monoEngine.setOutputRate(48000); monoEngine.track(0).pan=-1; monoEngine.play();
+        nova::AudioEngine monoEngine; monoEngine.setSmoothingTime(0); add(monoEngine,mono); monoEngine.setOutputRate(48000); monoEngine.track(0).pan=-1; monoEngine.play();
         out=render(monoEngine); expect(out.getMagnitude(1,0,out.getNumSamples())==0,"mono pan routes to left only");
         const auto toneA=dir.getChildFile("demo-tone-a.wav"),toneB=dir.getChildFile("demo-tone-b.wav");
         writeWave(toneA,48000,0.08f,0.08f,true); writeWave(toneB,44100,0.04f,0.05f,true);
-        nova::AudioEngine demo; add(demo,toneA); add(demo,toneB);
+        nova::AudioEngine demo; demo.setSmoothingTime(0); add(demo,toneA); add(demo,toneB);
         demo.setOutputRate(48000); demo.play(); out=render(demo);
         const float expected = 0.12f * static_cast<float>(std::sin(2 * juce::MathConstants<double>::pi * 220 * 17 / 48000.0));
         expect(std::abs(out.getSample(0,17)-expected)<0.0001f,"resampling 44.1 kHz sine into 48 kHz output");
         demo.stop();
         expect(nova::Session::save(dir.getChildFile("demo.novadaw"),demo,error),"save real audio fixture for native UI validation");
-        nova::AudioEngine capacity;
+        nova::AudioEngine capacity; capacity.setSmoothingTime(0);
         for(int i=0;i<nova::AudioEngine::maxTracks;++i) {
             auto clip=std::make_unique<nova::Clip>(); clip->sampleRate=48000; clip->samples.setSize(2,8); clip->samples.clear();
             if(!capacity.addClip(std::move(clip),error)) throw std::runtime_error("track capacity below 64");
@@ -112,7 +112,7 @@ int main(int argc, char** argv) {
         capacity.setOutputRate(48000); capacity.play(); out=render(capacity,4);
         expect(near(out.getSample(0,0),1) && capacity.masterPeak.load()>1,"master overload indication and output hard clipping protection");
         juce::MemoryBlock original; a.loadFileAsData(original);
-        nova::AudioEngine edited; edited.setOutputRate(48000); add(edited,a); add(edited,b);
+        nova::AudioEngine edited; edited.setSmoothingTime(0); edited.setOutputRate(48000); add(edited,a); add(edited,b);
         edited.track(1).regions.clear(); nova::EditModel edit(edited);
         const auto id=edited.track(0).regions.front().id; edit.select(0,id);
         expect(std::abs(edit.quantize(0.26)-0.5)<1e-9,"musical snap at 120 BPM");
@@ -132,14 +132,14 @@ int main(int argc, char** argv) {
         edit.rename(0,"Vocal edited");edit.recolour(0,0xffee7799);edit.resizeTrack(0,200);edited.track(1).outputMode=2;
         edited.bpm=96;edited.beatsPerBar=3;edited.beatUnit=4;
         expect(nova::Session::save(dir.getChildFile("edited.novadaw"),edited,error),"save v2 edited session");
-        nova::AudioEngine editedLoaded;
+        nova::AudioEngine editedLoaded; editedLoaded.setSmoothingTime(0);
         expect(nova::Session::load(dir.getChildFile("edited.novadaw"),editedLoaded,error),"open v2 edited session");
         expect(editedLoaded.track(0).regions.size()==2 && editedLoaded.track(0).name=="Vocal edited"
             && editedLoaded.track(0).colour==0xffee7799 && editedLoaded.track(0).height==200
             && editedLoaded.track(1).outputMode==2 && editedLoaded.bpm==96 && editedLoaded.beatsPerBar==3,
             "edited session persists regions, names, colours, heights, routing and tempo");
         juce::MemoryBlock after; a.loadFileAsData(after);expect(after==original,"all edits preserve original WAV bytes");
-        nova::AudioEngine loop;loop.setOutputRate(1000);add(loop,a);loop.setLoop(0.5,1,true);loop.seek(0.9);loop.play();
+        nova::AudioEngine loop; loop.setSmoothingTime(0);loop.setOutputRate(1000);add(loop,a);loop.setLoop(0.5,1,true);loop.seek(0.9);loop.play();
         out=render(loop,250);expect(loop.isPlaying() && std::abs(loop.position()-0.65)<1e-7,"sample-time loop wraps inside a callback");
         expect(near(out.getSample(0,100),0.1f),"loop renders audio across wrap boundary");
         loop.loopEnabled=false;loop.track(0).outputMode=2;out=render(loop);

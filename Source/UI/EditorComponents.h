@@ -1,5 +1,6 @@
 #pragma once
 #include "Session/EditModel.h"
+#include "MixComponents.h"
 namespace nova {
 using ApplyEdit = std::function<bool(std::function<bool()>)>;
 enum class Tool { smart, grabber, trim, selector, split };
@@ -71,10 +72,16 @@ public:
     void refresh();
     void paint(juce::Graphics&) override;
     bool validateBindings();
+    void closeEditors();
+    void scanPlugins(const juce::FileSearchPath& paths){catalog.scan(paths);}
+    std::function<void(bool)> onAddAux;
+    std::function<void()> onScanFolder;
 private:
     AudioEngine& engine;EditModel& editor;ApplyEdit apply;
-    std::vector<std::unique_ptr<TrackControls>> controls;
-    juce::Slider master;juce::Label masterName;
+    PluginCatalog catalog;
+    std::vector<std::unique_ptr<ChannelStrip>> controls;
+    juce::TextButton addAux{"+ Aux stereo"},addMono{"+ Bus mono"},scan{"Scan VST3"},scanFolder{"Pasta VST3"};
+    juce::Label scanStatus;
 };
 class ClipPanel final : public juce::Component,private juce::ListBoxModel {
 public:

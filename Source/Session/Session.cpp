@@ -1,19 +1,67 @@
 #include "Session.h"
 #include <cmath>
 #include <map>
+#include <set>
 namespace nova {
 static bool numeric(const juce::var& value) { return value.isDouble() || value.isInt() || value.isInt64(); }
+namespace {
+juce::var insertState(const std::array<std::unique_ptr<MixProcessor>,4>& inserts){juce::Array<juce::var> values;for(const auto& p:inserts)values.add(p?p->state():juce::var());return values;}
+bool readInserts(const juce::var& value,std::array<std::unique_ptr<MixProcessor>,4>& inserts,double rate,juce::String& error){
+    if(!value.isArray() || value.getArray()->size()!=4){error="Slots de insert invalidos.";return false;}
+    for(int i=0;i<4;++i){const auto& item=value.getArray()->getReference(i);if(item.isVoid())continue;
+        inserts[i]=MixProcessor::restore(item,rate,error);if(!inserts[i])return false;}
+    return true;
+}
+juce::var mixState(const Track& t){auto o=std::make_unique<juce::DynamicObject>();o->setProperty("inputGain",t.inputGain.load());o->setProperty("outputTarget",t.outputTarget);
+    o->setProperty("inserts",insertState(t.inserts));juce::Array<juce::var> sends;
+    for(const auto& send:t.sends){auto v=std::make_unique<juce::DynamicObject>();v->setProperty("target",send.target);v->setProperty("preFader",send.preFader);v->setProperty("gain",send.gain.load());sends.add(juce::var(v.release()));}
+    o->setProperty("sends",sends);o->setProperty("automationMode",int(t.automationMode));juce::Array<juce::var> lanes;
+    for(const auto& lane:t.automation){auto l=std::make_unique<juce::DynamicObject>();l->setProperty("target",lane.target);l->setProperty("parameter",lane.parameter);juce::Array<juce::var> points;
+        for(const auto& point:lane.points){auto v=std::make_unique<juce::DynamicObject>();v->setProperty("time",point.time);v->setProperty("value",point.value);points.add(juce::var(v.release()));}
+        l->setProperty("points",points);lanes.add(juce::var(l.release()));}
+    o->setProperty("automation",lanes);return juce::var(o.release());
+}
+bool readMix(const juce::var& v,Track& t,double rate,juce::String& error){
+    if(!v.isObject() || !numeric(v["inputGain"]) || !std::isfinite(double(v["inputGain"])) || double(v["inputGain"])<0 || double(v["inputGain"])>16
+        || !v["outputTarget"].isInt() || !v["sends"].isArray() || v["sends"].getArray()->size()!=2
+        || !v["automationMode"].isInt() || int(v["automationMode"])<0 || int(v["automationMode"])>1
+        || !v["automation"].isArray() || v["automation"].getArray()->size()>64){error="Mixagem/automacao invalida; apenas Off e Read suportados.";return false;}
+    t.inputGain=float(v["inputGain"]);t.outputTarget=int(v["outputTarget"]);t.automationMode=static_cast<AutomationMode>(int(v["automationMode"]));
+    if(!readInserts(v["inserts"],t.inserts,rate,error))return false;
+    for(int i=0;i<2;++i){const auto& send=v["sends"].getArray()->getReference(i);
+        if(!send.isObject() || !send["target"].isInt() || !send["preFader"].isBool() || !numeric(send["gain"]) || !std::isfinite(double(send["gain"])) || double(send["gain"])<0 || double(send["gain"])>2){error="Send invalido.";return false;}
+        t.sends[i].target=int(send["target"]);t.sends[i].preFader=bool(send["preFader"]);t.sends[i].gain=float(send["gain"]);
+    }
+    std::set<std::pair<int,int>> identities;
+    for(const auto& item:*v["automation"].getArray()){
+        if(!item.isObject() || !item["target"].isInt() || !item["parameter"].isInt() || !item["points"].isArray() || item["points"].getArray()->size()>4096){error="Lane de automacao invalida.";return false;}
+        AutomationLane lane;lane.target=int(item["target"]);lane.parameter=int(item["parameter"]);
+        if(lane.target<-2 || lane.target>3 || lane.parameter<0 || lane.parameter>65535 || (lane.target>=0 && !t.inserts[lane.target])
+            || !identities.insert({lane.target,lane.parameter}).second){error="Destino de automacao invalido/duplicado.";return false;}
+        float low=lane.target==-2?-1.0f:0.0f,high=lane.target==-2?1.0f:2.0f;
+        if(lane.target>=0){const auto& p=t.inserts[lane.target];if(p->kind!=EffectKind::vst3 || p->plugin){if(lane.parameter>=p->parameterCount()){error="Parametro de automacao inexistente.";return false;}const auto spec=p->spec(lane.parameter);low=spec.minimum;high=spec.maximum;}else high=1;}
+        double previous=-1;
+        for(const auto& point:*item["points"].getArray()){double time=double(point["time"]);float value=float(point["value"]);
+            if(!numeric(point["time"]) || !numeric(point["value"]) || !std::isfinite(time) || !std::isfinite(value) || time<0 || time>86400 || time<=previous || value<low || value>high){error="Ponto de automacao invalido.";return false;}
+            previous=time;lane.points.push_back({time,value});}
+        t.automation.push_back(std::move(lane));
+    }
+    return true;
+}
+}
 bool Session::save(const juce::File& file, const AudioEngine& engine, juce::String& error) {
     auto root = std::make_unique<juce::DynamicObject>();
-    root->setProperty("format", "nova-daw-session"); root->setProperty("version", 2);
+    root->setProperty("format", "nova-daw-session"); root->setProperty("version", 3);
     root->setProperty("masterGain", engine.masterGain.load());
+    root->setProperty("masterMute",engine.masterMute.load());root->setProperty("masterInserts",insertState(engine.masterInserts));
     root->setProperty("bpm",engine.bpm); root->setProperty("beatsPerBar",engine.beatsPerBar); root->setProperty("beatUnit",engine.beatUnit);
     root->setProperty("loopEnabled",engine.loopEnabled.load()); root->setProperty("loopStart",engine.loopStart.load()); root->setProperty("loopEnd",engine.loopEnd.load());
     juce::Array<juce::var> rows;
     for (int i = 0; i < engine.trackCount(); ++i) {
         const auto& t = engine.track(i);
         auto row = std::make_unique<juce::DynamicObject>();
-        row->setProperty("file", t.clip->source.getRelativePathFrom(file.getParentDirectory()));
+        row->setProperty("auxiliary",t.auxiliary);row->setProperty("monoBus",t.monoBus);row->setProperty("mix",mixState(t));
+        row->setProperty("file", t.auxiliary ? juce::String("@aux"):t.clip->source.getRelativePathFrom(file.getParentDirectory()));
         row->setProperty("name", t.name); row->setProperty("gain", t.gain.load());
         row->setProperty("pan", t.pan.load()); row->setProperty("mute", t.mute.load()); row->setProperty("solo", t.solo.load());
         row->setProperty("colour",juce::String::toHexString(static_cast<int64_t>(t.colour)));
@@ -37,11 +85,11 @@ bool Session::save(const juce::File& file, const AudioEngine& engine, juce::Stri
 bool Session::load(const juce::File& file, AudioEngine& engine, juce::String& error) {
     juce::var data;
     if (juce::JSON::parse(file.loadFileAsString(), data).failed() || !data.isObject()
-        || data["format"].toString() != "nova-daw-session" || !data["version"].isInt() || (static_cast<int>(data["version"]) != 1 && static_cast<int>(data["version"]) != 2)
+        || data["format"].toString() != "nova-daw-session" || !data["version"].isInt() || (int(data["version"])<1 || int(data["version"])>3)
         || !data["tracks"].isArray() || !numeric(data["masterGain"])) { error = "Sessao invalida ou versao nao suportada."; return false; }
     auto* rows = data["tracks"].getArray();
     if (rows->size() > AudioEngine::maxTracks) { error = "Sessao excede 64 faixas."; return false; }
-    const bool v2=static_cast<int>(data["version"])==2;
+    const bool v2=int(data["version"])>=2,v3=int(data["version"])==3;
     if(v2 && (!numeric(data["bpm"]) || !data["beatsPerBar"].isInt() || !data["beatUnit"].isInt()
         || !numeric(data["loopStart"]) || !numeric(data["loopEnd"]) || !data["loopEnabled"].isBool())) {
         error="Dados de tempo, compasso ou loop invalidos.";return false;
@@ -74,7 +122,10 @@ bool Session::load(const juce::File& file, AudioEngine& engine, juce::String& er
         if (!std::isfinite(gain) || !std::isfinite(pan) || gain < 0 || gain > 2 || pan < -1 || pan > 1) {
             error = "Volume ou pan invalido."; return false;
         }
-        auto clip = loadAsset(row["file"]);
+        std::shared_ptr<Clip> clip;
+        if(v3 && (!row["auxiliary"].isBool() || !row["monoBus"].isBool())){error="Tipo de canal invalido.";return false;}
+        if(v3 && bool(row["auxiliary"])) {clip=std::make_shared<Clip>();clip->name=row["name"].toString();clip->samples.setSize(2,1);clip->samples.clear();}
+        else clip=loadAsset(row["file"]);
         if (!clip) return false;
         Entry entry{clip,gain,pan,static_cast<bool>(row["mute"]),static_cast<bool>(row["solo"]),
             row["name"].isString() ? row["name"].toString() : clip->name,0xff55d8c2,140,0,{}};
@@ -100,16 +151,24 @@ bool Session::load(const juce::File& file, AudioEngine& engine, juce::String& er
     }
     double end=0;for(const auto& entry:entries)for(const auto& r:entry.regions)end=std::max(end,r.end());
     if(v2 && static_cast<bool>(data["loopEnabled"]) && (le<=ls || le>end+1e-8)){error="Loop fora da sessao.";return false;}
-    engine.clear();
+    auto candidate=std::make_unique<AudioEngine>();candidate->setOutputRate(engine.sampleRate());
     for (auto& entry : entries) {
-        engine.addSharedClip(entry.clip, error);
-        auto& t = engine.track(engine.trackCount() - 1);
+        candidate->addSharedClip(entry.clip, error);
+        auto& t = candidate->track(candidate->trackCount() - 1);
         t.gain = entry.gain; t.pan = entry.pan; t.mute = entry.mute; t.solo = entry.solo;
         t.name=entry.name;t.colour=entry.colour;t.height=entry.height;t.outputMode=entry.route;
-        t.regions=std::move(entry.regions);for(auto& r:t.regions)r.id=engine.newRegionId();
+        t.regions=std::move(entry.regions);for(auto& r:t.regions)r.id=candidate->newRegionId();
     }
-    engine.recalculateMediaBytes();engine.bpm=bpm;engine.beatsPerBar=beats;engine.beatUnit=unit;
-    engine.setLoop(ls,le,v2 && static_cast<bool>(data["loopEnabled"]));
-    engine.masterGain = master; return true;
+    candidate->recalculateMediaBytes();candidate->bpm=bpm;candidate->beatsPerBar=beats;candidate->beatUnit=unit;
+    candidate->setLoop(ls,le,v2 && static_cast<bool>(data["loopEnabled"]));
+    candidate->masterGain=master;
+    if(v3){if(!data["masterMute"].isBool() || !readInserts(data["masterInserts"],candidate->masterInserts,engine.sampleRate(),error))return false;
+        candidate->masterMute=bool(data["masterMute"]);
+        for(int i=0;i<rows->size();++i){auto& t=candidate->track(i);const auto& row=rows->getReference(i);t.auxiliary=bool(row["auxiliary"]);t.monoBus=bool(row["monoBus"]);
+            if(t.auxiliary && !t.regions.empty()){error="Aux nao pode conter regioes WAV.";return false;}
+            if(!readMix(row["mix"],t,engine.sampleRate(),error))return false;}
+        if(!candidate->rebuildGraph(error))return false;
+    }
+    engine.replaceSession(*candidate);return true;
 }
 }

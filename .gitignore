@@ -5,3 +5,4 @@
 *.wav
 *.novadaw
 /.nova-preferences.json
+/.nova-plugin-list.xml

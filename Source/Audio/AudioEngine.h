@@ -4,6 +4,7 @@
 #include <atomic>
 #include <memory>
 #include <vector>
+#include "MixProcessor.h"
 
 namespace nova {
 struct Peak { float low = 0, high = 0; };
@@ -16,6 +17,8 @@ struct Clip {
     double duration() const { return samples.getNumSamples() / sampleRate; }
 };
 struct Track {
+    bool auxiliary = false;
+    bool monoBus = false;
     std::shared_ptr<Clip> clip;
     struct Region {
         uint64_t id = 0;
@@ -30,10 +33,19 @@ struct Track {
     std::atomic<float> gain{1}, pan{0}, peak{0};
     std::atomic<bool> mute{false}, solo{false};
     std::atomic<int> outputMode{0}; // 0 master stereo, 1 master left, 2 master right
+    std::atomic<float> inputGain{1}, rms{0};
+    std::atomic<bool> clipped{false};
+    int outputTarget = -1; // -1 Master, otherwise an auxiliary channel
+    struct Send { int target = -1; bool preFader = false; std::atomic<float> gain{0}; };
+    std::array<Send, 2> sends;
+    std::array<std::unique_ptr<MixProcessor>, 4> inserts;
+    AutomationMode automationMode = AutomationMode::off;
+    std::vector<AutomationLane> automation;
 };
 
 class AudioEngine final : public juce::AudioIODeviceCallback {
 public:
+    AudioEngine();
     static constexpr int maxTracks = 64;
     static constexpr int64_t maxSessionBytes = 512LL * 1024 * 1024;
     static constexpr int maxRegionsPerTrack = 128;
@@ -43,6 +55,15 @@ public:
     bool addSharedClip(std::shared_ptr<Clip>, juce::String& error);
     void recalculateMediaBytes();
     void clear();
+    bool addAux(const juce::String&, bool mono, juce::String&);
+    bool setRoute(int source, int destination, juce::String&);
+    bool setSend(int source, int slot, int destination, bool preFader, juce::String&);
+    bool rebuildGraph(juce::String&);
+    void prepareProcessors();
+    void closeEditors();
+    void replaceSession(AudioEngine& validated);
+    double sampleRate() const { return outputRate; }
+    void setSmoothingTime(double seconds);
     int trackCount() const { return count; }
     Track& track(int index) { return tracks.at(static_cast<size_t>(index)); }
     const Track& track(int index) const { return tracks.at(static_cast<size_t>(index)); }
@@ -59,9 +80,12 @@ public:
     void seek(double seconds);
     bool isPlaying() const { return playing.load(); }
     double position() const { return visiblePosition.load(); }
-    void setOutputRate(double rate) { outputRate = rate > 0 ? rate : 44100; }
+    void setOutputRate(double rate);
     void render(float* const* output, int channels, int frames) noexcept;
     std::atomic<float> masterGain{1}, masterPeak{0};
+    std::atomic<float> masterRms{0};
+    std::atomic<bool> masterClipped{false}, masterMute{false};
+    std::array<std::unique_ptr<MixProcessor>, 4> masterInserts;
     void audioDeviceIOCallbackWithContext(const float* const*, int,
         float* const*, int, int, const juce::AudioIODeviceCallbackContext&) override;
     void audioDeviceAboutToStart(juce::AudioIODevice*) override;
@@ -76,6 +100,14 @@ private:
     uint64_t consumedSeek = 0;
     double renderPosition = 0, outputRate = 44100;
     uint64_t nextRegionId = 1;
+    std::array<juce::AudioBuffer<float>, maxTracks> channelBuffers;
+    juce::AudioBuffer<float> masterBuffer;
+    std::array<int, maxTracks> processingOrder{};
+    std::array<juce::SmoothedValue<float>, maxTracks> smoothGain, smoothPan, smoothInput;
+    juce::SmoothedValue<float> smoothMaster;
+    double smoothingTime = 0.005;
+    bool smoothingInitialized = false;
+    void renderBlock(float* const*, int channels, int offset, int frames) noexcept;
 };
 
 class AudioRuntime {
@@ -89,7 +121,7 @@ public:
         const bool resume = engine.isPlaying();
         engine.pause();
         devices.removeAudioCallback(&engine);
-        try { edit(); } catch (...) { devices.addAudioCallback(&engine); throw; }
+        try { edit(); engine.prepareProcessors(); } catch (...) { devices.addAudioCallback(&engine); throw; }
         devices.addAudioCallback(&engine);
         if (resume && engine.duration() > 0) engine.play();
     }
