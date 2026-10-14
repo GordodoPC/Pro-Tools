@@ -167,10 +167,22 @@ processou 35376 callbacks/13817539 samples, CPU 17,99%, máximo 18,070 ms e
 Memória privada: início 82,30 MiB, final 98,78 MiB, pico amostrado 99,49 MiB.
 Artefato: `build/stability-phase35-release-300s/stability-result.json`.
 
-A medição de 300 s da versão final com latência dinâmica está em execução em
-`build/stability-phase35-final-release-300s`; executável e módulo foram
-copiados após a validação para preservar a versão medida durante o trabalho
-nas fases seguintes. O resultado será acrescentado após seu término.
+A versão final completou **300.05 s**, com **35373** callbacks e
+**13815971** samples; CPU **15.23%** de um núcleo,
+render máximo **29.327 ms**, **7 violações de prazo**.
+Zero alocações C++ observadas, zero erros de controle e samples finitos;
+**10 recalculos dinâmicos** de latência executados.
+Memória privada: início 82.86 MiB,
+final 99.69 MiB, pico amostrado 101.27 MiB.
+Há crescimento de memória neste intervalo; o teste não comprova ausência de
+vazamentos. Caches/edição de estado exigem medição de horas para qualificá-lo.
+A estabilidade funcional passou; os prazos observados impedem declarar carga
+máxima/hard real-time certificada. Esse ensaio não usou hardware de áudio.
+
+Artefato: `build/stability-phase35-final-release-300s/stability-result.json`.
+Executável/módulo foram copiados após a validação para preservar a revisão
+medida durante o desenvolvimento das próximas fases. A estabilização funcional
+da Fase 3.5 foi concluída com esses limites documentados.
 
 
 Os testes detectam falhas funcionais, amostras inválidas e alocações observadas;
