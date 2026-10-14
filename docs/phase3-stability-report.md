@@ -13,7 +13,8 @@ Nenhum plugin de terceiros foi instalado ou certificado.
 
 A pendência de compatibilidade com terceiros não bloqueia Fases 4, 5 e 6,
 conforme instrução posterior do usuário. MIDI não foi implementado nesta
-estabilização; o escopo das Fases 4/5/6 foi solicitado separadamente.
+estabilização. O escopo autorizado das Fases 4/5/6 está em
+[roadmap-phases-4-6.md](roadmap-phases-4-6.md); elas serão executadas nessa ordem.
 
 ## Auditoria do caminho de áudio
 
@@ -125,7 +126,11 @@ permanece pendente porque nenhum módulo externo estava disponível.
 
 ## Validação automatizada
 
-RESULTADOS_FINAIS
+Ninja x64 Debug e Release compilados; CTest **7/7 em ambos**.
+AudioAndSessions: 97; MixerRouting: 36; DSPVST3AutomationSessions: 44;
+PluginDelayCompensation: 116; VST3ConcurrencyAndStability: 40 verificações.
+Total **333** por build, além dos smoke tests C++20/SDK e JUCE.
+Execução final: Debug 18,20 s; Release 14,20 s; nenhuma falha funcional.
 
 PDC cobre impulsos conhecidos com atrasos reais 0, 1, 17, 255, 256 e 511,
 faixas paralelas, buses encadeados, Master, sends pré/pós com amplitudes
@@ -149,7 +154,24 @@ A versão final também altera a latência do VST3 durante reprodução e conta
 recalculos. CPU (tempo de processo equivalente a um núcleo) e memória privada
 são amostradas a cada segundo; duração/prazos do render também são registrados.
 
-MEDICAO_FINAL
+| Execução final curta | Callbacks | CPU equivalente a 1 núcleo | Maior render | Violações de prazo | Alocações observadas |
+|---|---:|---:|---:|---:|---:|
+| Debug, 10.05 s | 1178 | 84.44% | 158.215 ms | 152 | 0 |
+| Release, 10.07 s | 1189 | 13.34% | 5.357 ms | 0 | 0 |
+
+Todas as execuções curtas tiveram zero erros de controle, samples finitos e
+recalculo dinâmico de latência observado. A medição preliminar de 300,05 s,
+antes da última correção da fixture e sem variação dinâmica de latência,
+processou 35376 callbacks/13817539 samples, CPU 17,99%, máximo 18,070 ms e
+8 violações de prazo; zero alocações observadas/erros de controle.
+Memória privada: início 82,30 MiB, final 98,78 MiB, pico amostrado 99,49 MiB.
+Artefato: `build/stability-phase35-release-300s/stability-result.json`.
+
+A medição de 300 s da versão final com latência dinâmica está em execução em
+`build/stability-phase35-final-release-300s`; executável e módulo foram
+copiados após a validação para preservar a versão medida durante o trabalho
+nas fases seguintes. O resultado será acrescentado após seu término.
+
 
 Os testes detectam falhas funcionais, amostras inválidas e alocações observadas;
 exceder o prazo é registrado separadamente, sem transformar estabilidade
@@ -180,7 +202,11 @@ opaco JUCE; bytes internos do plugin não substituem o formato de estado do host
 
 ## Validação de janela e hardware executada
 
-UI_FINAL
+Debug e Release: `passed: true`, todos os critérios booleanos verdadeiros
+em `build/ui-validation-phase35-{debug,release}/ui-result.json`.
+Dispositivo: `Alto-falantes (Realtek(R) Audio) | 48000 Hz | 480 samples`.
+Snapshot MIX final Release inspecionado: controles/faders visíveis em 1280×800,
+status mostra PDC/contador de contenção e dispositivo.
 
 Esse teste automático verifica callback de saída Realtek não nulo, Play/Pause,
 Stop/seek/loop, gestos/layout, bindings Edit/Mix, DSP/send/Read/Master e sessão.
