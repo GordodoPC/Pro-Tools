@@ -19,3 +19,10 @@
 - Iniciado primeiro ciclo MIDI: dados musicais, PPQ/ticks/samples, agendamento
   limitado por bloco e importação/exportação SMF. Build/testes desse ciclo em curso.
 - Piano Roll, gravação MIDI e instrumentos ainda não concluídos neste ciclo.
+
+## 2026-10-14 — Fase 4, ciclo de dados validado
+
+- PPQ 960, mensagens musicais e offsets por sample; filas de saída limitadas.
+- SMF e estado do modelo com roundtrip, overflow/panic e validação de metadados.
+- Builds Debug/Release aprovados, CTest 8/8 em ambos, 14 novas verificações.
+- Próximo: instrumento VST3 original gerando áudio e integração MIDI no grafo.
