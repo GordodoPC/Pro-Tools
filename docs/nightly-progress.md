@@ -74,3 +74,6 @@
 
 - Revisão final: falha de alocação injetada no snapshot de bounce tratada em ambos
   os builds, preservando a sessão; 55 checks de edição/offline, 503 no total.
+
+- Entrega Fase 6 testada no commit local `0f7f605`; Fase 5 `811ffeb`, Fase 4
+  `86b44d5`. Relatórios/evidências atualizados; nenhum push remoto executado.

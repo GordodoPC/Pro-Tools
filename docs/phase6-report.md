@@ -165,3 +165,6 @@ Build Release validado (SHA256):
 `6C204A8F238ABD6BD72DCD6E08943AA6FA8442BD171A7683A173541A22C7119B`.
 Path Windows: `C:\Users\eduar\OneDrive\Documentos\Projeto SOM\ProTools\build\ninja-release\NovaDAW_artefacts\Release\NOVA DAW.exe`.
 Regressões MIDI/recording da UI passaram; hardwareInput=false/physicalMidi=false.
+
+Commits locais de entrega: Fase 4 `86b44d5`, Fase 5 `811ffeb`, Fase 6 `0f7f605`.
+Escopo oficial: roadmap-phases-4-6.md; diretrizes AGENTS.md. Sem push remoto.
