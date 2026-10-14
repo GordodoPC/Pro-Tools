@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <set>
 
 namespace nova {
 static_assert(std::atomic<float>::is_always_lock_free);
@@ -47,24 +48,45 @@ std::unique_ptr<Clip> AudioEngine::loadWav(const juce::File& file, juce::String&
 }
 
 bool AudioEngine::addClip(std::unique_ptr<Clip> clip, juce::String& error) {
+    return addSharedClip(std::shared_ptr<Clip>(std::move(clip)),error);
+}
+void AudioEngine::recalculateMediaBytes() {
+    std::set<const Clip*> assets;
+    for(int i=0;i<count;++i) { assets.insert(track(i).clip.get()); for(const auto& r:track(i).regions)assets.insert(r.asset.get()); }
+    bytes=0;
+    for(const auto* asset:assets) if(asset) bytes+=static_cast<int64_t>(asset->samples.getNumSamples())*asset->samples.getNumChannels()*sizeof(float);
+}
+bool AudioEngine::addSharedClip(std::shared_ptr<Clip> clip, juce::String& error) {
     if (!clip) { error = "Clip vazio."; return false; }
-    const int64_t clipBytes = static_cast<int64_t>(clip->samples.getNumChannels()) * clip->samples.getNumSamples() * sizeof(float);
+    bool exists=false;
+    for(int i=0;i<count;++i) { exists|=track(i).clip.get()==clip.get(); for(const auto& r:track(i).regions)exists|=r.asset.get()==clip.get(); }
+    const int64_t clipBytes = exists ? 0 : static_cast<int64_t>(clip->samples.getNumChannels()) * clip->samples.getNumSamples() * sizeof(float);
     if (count == maxTracks || bytes + clipBytes > maxSessionBytes) {
         error = "Limite: 64 faixas e 512 MiB de audio decodificado por sessao."; return false;
     }
     auto& t = tracks[static_cast<size_t>(count++)];
     t.clip = std::move(clip); t.gain = 1; t.pan = 0; t.mute = false; t.solo = false; t.peak = 0;
+    t.name = t.clip->name; t.height = 140; t.outputMode = 0;
+    t.colour = juce::Colour::fromHSV(std::fmod(0.47f + (count - 1) * 0.13f, 1.0f), 0.5f, 0.88f, 1.0f).getARGB();
+    t.regions = {{newRegionId(), t.clip, 0, 0, t.clip->duration()}};
     bytes += clipBytes; return true;
 }
 void AudioEngine::clear() {
     stop();
-    for (auto& t : tracks) t.clip.reset();
+    for (auto& t : tracks) { t.regions.clear(); t.clip.reset(); }
     count = 0; bytes = 0; masterGain = 1;
+    loopEnabled = false; loopStart = 0; loopEnd = 0; bpm = 120; beatsPerBar = beatUnit = 4;
 }
 double AudioEngine::duration() const {
     double end = 0;
-    for (int i = 0; i < count; ++i) end = std::max(end, tracks[static_cast<size_t>(i)].clip->duration());
+    for (int i = 0; i < count; ++i) for (const auto& region : tracks[static_cast<size_t>(i)].regions) end = std::max(end, region.end());
     return end;
+}
+void AudioEngine::setLoop(double start, double end, bool enabled) {
+    if (!std::isfinite(start) || !std::isfinite(end) || start < 0 || end <= start || end > duration() + 1e-8) {
+        loopEnabled = false; return;
+    }
+    loopStart = start; loopEnd = end; loopEnabled = enabled;
 }
 void AudioEngine::seek(double seconds) {
     if (!std::isfinite(seconds)) return;
@@ -83,23 +105,32 @@ void AudioEngine::render(float* const* output, int channels, int frames) noexcep
     for (int i = 0; i < count; ++i) tracks[static_cast<size_t>(i)].peak = 0;
     if (!playing.load() || channels == 0 || frames <= 0) { masterPeak = 0; return; }
     bool anySolo = false;
+    const double ls = loopStart.load(), le = loopEnd.load();
+    const bool looping = loopEnabled.load() && le > ls && ls >= 0 && le <= duration() + 1e-8;
+    auto timeAt = [&](int frame) {
+        const double time = renderPosition + frame / outputRate;
+        return looping && time >= le ? ls + std::fmod(time - ls, le - ls) : time;
+    };
     for (int i = 0; i < count; ++i) anySolo |= tracks[static_cast<size_t>(i)].solo.load(std::memory_order_relaxed);
     for (int i = 0; i < count; ++i) {
         auto& t = tracks[static_cast<size_t>(i)];
         if (t.mute.load(std::memory_order_relaxed) || (anySolo && !t.solo.load(std::memory_order_relaxed))) continue;
-        const auto& clip = *t.clip;
         const auto gain = std::clamp(t.gain.load(std::memory_order_relaxed), 0.0f, 2.0f);
         const auto pan = std::clamp(t.pan.load(std::memory_order_relaxed), -1.0f, 1.0f);
+        const int route = t.outputMode.load(std::memory_order_relaxed);
+        float level = 0;
+        for (const auto& region : t.regions) {
+        const auto& clip = *region.asset;
         const bool mono = clip.samples.getNumChannels() == 1;
         const float leftGain = gain * (mono ? std::sqrt((1 - pan) * 0.5f) : (pan > 0 ? 1 - pan : 1));
         const float rightGain = gain * (mono ? std::sqrt((1 + pan) * 0.5f) : (pan < 0 ? 1 + pan : 1));
         const auto* left = clip.samples.getReadPointer(0);
         const auto* right = clip.samples.getReadPointer(mono ? 0 : 1);
-        float level = 0;
-        const double step = clip.sampleRate / outputRate;
-        double sourcePosition = renderPosition * clip.sampleRate;
-        for (int frame = 0; frame < frames; ++frame, sourcePosition += step) {
-            if (sourcePosition >= clip.samples.getNumSamples()) break;
+        for (int frame = 0; frame < frames; ++frame) {
+            const double time = timeAt(frame);
+            if (time < region.start || time >= region.end()) continue;
+            const double sourcePosition = (time - region.start + region.offset) * clip.sampleRate;
+            if (sourcePosition < 0 || sourcePosition >= clip.samples.getNumSamples()) continue;
             const int index = static_cast<int>(sourcePosition);
             const int next = std::min(index + 1, clip.samples.getNumSamples() - 1);
             const float frac = static_cast<float>(sourcePosition - index);
@@ -107,10 +138,11 @@ void AudioEngine::render(float* const* output, int channels, int frames) noexcep
             const float r = (right[index] + (right[next] - right[index]) * frac) * rightGain;
             if (channels == 1) { if (output[0]) output[0][frame] += (l + r) * 0.5f; }
             else {
-                if (output[0]) output[0][frame] += l;
-                if (output[1]) output[1][frame] += r;
+                if (output[0]) output[0][frame] += route == 2 ? 0 : route == 1 ? (l+r)*0.5f : l;
+                if (output[1]) output[1][frame] += route == 1 ? 0 : route == 2 ? (l+r)*0.5f : r;
             }
             level = std::max(level, std::max(std::abs(l), std::abs(r)));
+        }
         }
         t.peak = level;
     }
@@ -120,8 +152,8 @@ void AudioEngine::render(float* const* output, int channels, int frames) noexcep
         masterLevel = std::max(masterLevel, std::abs(value));
         output[c][frame] = std::clamp(value, -1.0f, 1.0f);
     }
-    renderPosition += frames / outputRate;
-    if (renderPosition >= duration()) { renderPosition = duration(); playing = false; }
+    renderPosition = timeAt(frames);
+    if (!looping && renderPosition >= duration()) { renderPosition = duration(); playing = false; }
     visiblePosition.store(renderPosition); masterPeak = masterLevel;
 }
 void AudioEngine::audioDeviceIOCallbackWithContext(const float* const*, int,

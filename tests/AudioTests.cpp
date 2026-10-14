@@ -1,5 +1,7 @@
 #include "Audio/AudioEngine.h"
 #include "Session/Session.h"
+#include "Session/EditModel.h"
+#include "Session/Preferences.h"
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -109,6 +111,60 @@ int main(int argc, char** argv) {
         for(int i=0;i<capacity.trackCount();++i) for(int c=0;c<2;++c) for(int s=0;s<8;++s) capacity.track(i).clip->samples.setSample(c,s,0.1f);
         capacity.setOutputRate(48000); capacity.play(); out=render(capacity,4);
         expect(near(out.getSample(0,0),1) && capacity.masterPeak.load()>1,"master overload indication and output hard clipping protection");
+        juce::MemoryBlock original; a.loadFileAsData(original);
+        nova::AudioEngine edited; edited.setOutputRate(48000); add(edited,a); add(edited,b);
+        edited.track(1).regions.clear(); nova::EditModel edit(edited);
+        const auto id=edited.track(0).regions.front().id; edit.select(0,id);
+        expect(std::abs(edit.quantize(0.26)-0.5)<1e-9,"musical snap at 120 BPM");
+        expect(edit.move(2,0),"move clip metadata"); edited.play(); out=render(edited);
+        expect(out.getMagnitude(0,out.getNumSamples())==0,"moved clip starts with silence");
+        edited.seek(2);out=render(edited);expect(near(out.getSample(0,0),0.1f),"moved clip renders at new position");
+        expect(edit.split(3) && edited.track(0).regions.size()==2,"split creates two source references");
+        edited.seek(3);out=render(edited);expect(near(out.getSample(0,0),0.1f),"split boundary has no doubled sample");
+        edit.select(0,id);expect(edit.trim(2.25,2.75),"trim updates offset and duration");
+        edited.seek(2);out=render(edited);expect(out.getMagnitude(0,out.getNumSamples())==0,"trimmed-away interval is silent");
+        expect(edit.copy() && edit.paste(1,4),"copy/paste across tracks");
+        expect(edited.track(1).regions.front().asset==edited.track(0).clip,"paste shares audio without copying or altering media");
+        expect(edit.undo() && edited.track(1).regions.empty(),"undo paste");
+        expect(edit.redo() && edited.track(1).regions.size()==1,"redo paste");
+        expect(edit.erase() && edited.track(1).regions.empty(),"delete region");
+        expect(edit.undo() && edited.track(1).regions.size()==1,"undo delete restores asset reference");
+        edit.rename(0,"Vocal edited");edit.recolour(0,0xffee7799);edit.resizeTrack(0,200);edited.track(1).outputMode=2;
+        edited.bpm=96;edited.beatsPerBar=3;edited.beatUnit=4;
+        expect(nova::Session::save(dir.getChildFile("edited.novadaw"),edited,error),"save v2 edited session");
+        nova::AudioEngine editedLoaded;
+        expect(nova::Session::load(dir.getChildFile("edited.novadaw"),editedLoaded,error),"open v2 edited session");
+        expect(editedLoaded.track(0).regions.size()==2 && editedLoaded.track(0).name=="Vocal edited"
+            && editedLoaded.track(0).colour==0xffee7799 && editedLoaded.track(0).height==200
+            && editedLoaded.track(1).outputMode==2 && editedLoaded.bpm==96 && editedLoaded.beatsPerBar==3,
+            "edited session persists regions, names, colours, heights, routing and tempo");
+        juce::MemoryBlock after; a.loadFileAsData(after);expect(after==original,"all edits preserve original WAV bytes");
+        nova::AudioEngine loop;loop.setOutputRate(1000);add(loop,a);loop.setLoop(0.5,1,true);loop.seek(0.9);loop.play();
+        out=render(loop,250);expect(loop.isPlaying() && std::abs(loop.position()-0.65)<1e-7,"sample-time loop wraps inside a callback");
+        expect(near(out.getSample(0,100),0.1f),"loop renders audio across wrap boundary");
+        loop.loopEnabled=false;loop.track(0).outputMode=2;out=render(loop);
+        expect(out.getMagnitude(0,0,out.getNumSamples())==0 && near(out.getSample(1,0),0.15f),"track output routes to master right");
+        const auto legacy=dir.getChildFile("legacy.novadaw");
+        legacy.replaceWithText("{\"format\":\"nova-daw-session\",\"version\":1,\"masterGain\":1,\"tracks\":[{\"file\":\"track-a.wav\",\"gain\":1,\"pan\":0,\"mute\":false,\"solo\":false}]}");
+        expect(nova::Session::load(legacy,editedLoaded,error) && editedLoaded.track(0).regions.size()==1,"phase 1 sessions remain readable");
+        edit.select(0,id);expect(!edit.move(86400,0) && edit.copy() && !edit.paste(1,86400),"edits respect the session's 24 hour limit");
+        nova::EditModel toneEdit(demo); toneEdit.select(0,demo.track(0).regions.front().id);
+        demo.seek(1.125);demo.play();const auto reference=render(demo);
+        expect(toneEdit.split(1),"split a real tone clip");demo.seek(1.125);out=render(demo);
+        bool same=true;for(int c=0;c<2;++c)for(int s=0;s<out.getNumSamples();++s)same &= near(out.getSample(c,s),reference.getSample(c,s));
+        expect(same,"split preserves source sample phase and stereo mix");
+        auto malformed=juce::JSON::parse(session.loadFileAsString());malformed.getDynamicObject()->setProperty("loopEnabled","yes");
+        bad.replaceWithText(juce::JSON::toString(malformed));
+        expect(!nova::Session::load(bad,restored,error) && restored.trackCount()==2,"reject malformed loop transactionally");
+        malformed=juce::JSON::parse(session.loadFileAsString());malformed["tracks"].getArray()->getReference(0).getDynamicObject()->setProperty("colour","bad-colour");
+        bad.replaceWithText(juce::JSON::toString(malformed));
+        expect(!nova::Session::load(bad,restored,error) && restored.trackCount()==2,"reject malformed track colour transactionally");
+        nova::Preferences preferences;preferences.trackWidth=310;preferences.clipWidth=230;preferences.horizontalZoom=240;preferences.verticalZoom=1.5;preferences.mix=true;preferences.snap=false;
+        const auto preferencesFile=dir.getChildFile("preferences.json");expect(preferences.save(preferencesFile),"save editor preferences");
+        nova::Preferences loadedPreferences;loadedPreferences.load(preferencesFile);
+        expect(loadedPreferences.trackWidth==310 && loadedPreferences.clipWidth==230 && loadedPreferences.horizontalZoom==240 && loadedPreferences.verticalZoom==1.5 && loadedPreferences.mix && !loadedPreferences.snap,"preferences restore pane sizes, zoom, view and snap");
+        preferencesFile.replaceWithText("{\"version\":1,\"horizontalZoom\":10000}");loadedPreferences=nova::Preferences{};loadedPreferences.load(preferencesFile);
+        expect(loadedPreferences.horizontalZoom==600 && loadedPreferences.trackWidth==250 && loadedPreferences.clipWidth==190 && loadedPreferences.verticalZoom==1 && loadedPreferences.snap,"partial preferences keep defaults and clamp invalid sizes");
         std::cout << checks << " checks passed\n";
         return 0;
     } catch(const std::exception& error) { std::cerr << "FAIL: " << error.what() << '\n'; return 1; }

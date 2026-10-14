@@ -16,23 +16,43 @@ struct Clip {
     double duration() const { return samples.getNumSamples() / sampleRate; }
 };
 struct Track {
-    std::unique_ptr<Clip> clip;
+    std::shared_ptr<Clip> clip;
+    struct Region {
+        uint64_t id = 0;
+        std::shared_ptr<Clip> asset;
+        double start = 0, offset = 0, length = 0;
+        double end() const { return start + length; }
+    };
+    std::vector<Region> regions;
+    juce::String name;
+    uint32_t colour = 0xff55d8c2;
+    int height = 140;
     std::atomic<float> gain{1}, pan{0}, peak{0};
     std::atomic<bool> mute{false}, solo{false};
+    std::atomic<int> outputMode{0}; // 0 master stereo, 1 master left, 2 master right
 };
 
 class AudioEngine final : public juce::AudioIODeviceCallback {
 public:
     static constexpr int maxTracks = 64;
     static constexpr int64_t maxSessionBytes = 512LL * 1024 * 1024;
+    static constexpr int maxRegionsPerTrack = 128;
     static std::unique_ptr<Clip> loadWav(const juce::File&, juce::String& error);
     // Structural operations must run with the hardware callback detached.
     bool addClip(std::unique_ptr<Clip>, juce::String& error);
+    bool addSharedClip(std::shared_ptr<Clip>, juce::String& error);
+    void recalculateMediaBytes();
     void clear();
     int trackCount() const { return count; }
     Track& track(int index) { return tracks.at(static_cast<size_t>(index)); }
     const Track& track(int index) const { return tracks.at(static_cast<size_t>(index)); }
     double duration() const;
+    uint64_t newRegionId() { return nextRegionId++; }
+    void setLoop(double start, double end, bool enabled);
+    std::atomic<bool> loopEnabled{false};
+    std::atomic<double> loopStart{0}, loopEnd{0};
+    double bpm = 120;
+    int beatsPerBar = 4, beatUnit = 4;
     void play() { playing.store(true); }
     void pause() { playing.store(false); }
     void stop() { pause(); seek(0); }
@@ -55,6 +75,7 @@ private:
     std::atomic<uint64_t> seekGeneration{0};
     uint64_t consumedSeek = 0;
     double renderPosition = 0, outputRate = 44100;
+    uint64_t nextRegionId = 1;
 };
 
 class AudioRuntime {
@@ -65,10 +86,12 @@ public:
     AudioRuntime();
     ~AudioRuntime();
     template<class F> void editStructure(F&& edit) {
+        const bool resume = engine.isPlaying();
         engine.pause();
         devices.removeAudioCallback(&engine);
-        edit();
+        try { edit(); } catch (...) { devices.addAudioCallback(&engine); throw; }
         devices.addAudioCallback(&engine);
+        if (resume && engine.duration() > 0) engine.play();
     }
     juce::String deviceDescription() const;
 };

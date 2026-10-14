@@ -1,50 +1,11 @@
 #pragma once
 #include "Audio/AudioEngine.h"
+#include "EditorComponents.h"
+#include "Session/Preferences.h"
 #include "Session/Session.h"
 #include <functional>
 
 namespace nova {
-class TrackControls final : public juce::Component {
-public:
-    TrackControls(AudioEngine&, int index, bool vertical, std::function<void()> changed);
-    void paint(juce::Graphics&) override;
-    void resized() override;
-    void refresh();
-    bool validateBindings();
-private:
-    AudioEngine& engine;
-    int index;
-    bool vertical;
-    juce::Label name, gainLabel, panLabel;
-    juce::Slider gain, pan;
-    juce::TextButton mute{"M"}, solo{"S"};
-};
-
-class Timeline final : public juce::Component {
-public:
-    explicit Timeline(AudioEngine&);
-    void paint(juce::Graphics&) override;
-    void mouseDown(const juce::MouseEvent&) override;
-    void rebuild(std::function<void()> changed);
-    void setZoom(double value);
-    bool validateBindings();
-    double pixelsPerSecond = 90;
-private:
-    AudioEngine& engine;
-    std::vector<std::unique_ptr<TrackControls>> controls;
-};
-
-class Mixer final : public juce::Component {
-public:
-    explicit Mixer(AudioEngine&);
-    void paint(juce::Graphics&) override;
-    void rebuild(std::function<void()> changed);
-    bool validateBindings();
-private:
-    AudioEngine& engine;
-    std::vector<std::unique_ptr<TrackControls>> controls;
-};
-
 class MainComponent final : public juce::Component, public juce::FileDragAndDropTarget,
                             private juce::Timer, private juce::MenuBarModel {
 public:
@@ -61,12 +22,25 @@ public:
     void enableUiValidation(const juce::File& outputDirectory);
 private:
     AudioRuntime audio;
+    EditModel editor;
+    TrackPanel trackPanel;
     Timeline timeline;
+    Ruler ruler;
     Mixer mixer;
-    juce::Viewport editView, mixView;
+    ClipPanel clipPanel;
+    LinkedViewport editView,trackView;
+    juce::Viewport mixView;
+    Divider trackDivider,clipDivider;
+    Preferences preferences;
+    juce::File preferencesFile;
     juce::MenuBarComponent menu;
     juce::TextButton editButton{"EDIT"}, mixButton{"MIX"}, importButton{"Importar WAV"};
     juce::TextButton playButton{"Play"}, pauseButton{"Pause"}, stopButton{"Stop"}, audioButton{"Audio"};
+    juce::TextButton startButton{"|<"},loopButton{"Loop"},snapButton{"Snap"};
+    juce::TextButton undoButton{"Undo"},redoButton{"Redo"};
+    juce::ComboBox toolBox,gridBox,signature;
+    juce::Slider verticalZoom,tempo;
+    juce::Label selectionLabel,trackHeader,toolLabel,bpmLabel;
     juce::Label clock, status, masterLabel;
     juce::Slider master, zoom;
     juce::LookAndFeel_V4 look;
@@ -79,6 +53,11 @@ private:
     void chooseOpen();
     void saveSession(bool saveAs);
     void refreshTracks();
+    void refreshEdited();
+    bool applyEdit(std::function<bool()>);
+    void editCommand(int);
+    void setLoopFromSelection();
+    bool validateEditor();
     void showError(const juce::String&);
     void confirmReplacement(std::function<void()>);
     juce::StringArray getMenuBarNames() override;
@@ -89,6 +68,7 @@ private:
     bool validationSawAudio = false, validationSawPlay = false, validationSawPause = false;
     bool validationImported = false, validationResume = false;
     bool validationControls = false;
+    bool validationEditing=false,validationLoop=false;
     double validationPausePosition = 0;
 };
 }
