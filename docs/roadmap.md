@@ -31,7 +31,7 @@ ou funcionalidades/testes pendentes como entregues.
 
 | Etapa | Resultado | Limite/continuidade |
 |---|---|---|
-| 1 | Instrumentação, análise de memória, cache EQ/PDC e comparação 300 s executados | 4→2 atrasos na mesma carga; causa dos nove históricos não demonstrável; horas/ETW pendentes |
+| 1 | Investigação/correções executadas, estabilização parcial | Carga histórica4→2; integrada7 com FIR32→10, max26,244ms; causa dos nove históricos não demonstrável; horas/ETW pendentes |
 | 2 | Read/Write/Touch/Latch, volume/pan/inserts, curvas/Undo/Redo e sessão v7 | Captura a 30 Hz no host; gestos de editor VST3 externo pendentes |
 | 3 | VCA/grupos, ganho/Solo Safe, sends avançados, sidechain nativo/PDC | Auxiliar VST3 pendente; matriz multicanal preparada, render/dispositivo stereo |
 | 4 | LUFS M/I, estimador True Peak, crest/PLR, FFT, normalização/TPDF, WAV/rates/stems offline | Sem limiter/caudas automáticas ou certificação completa; stems de buses não lineares podem não somar ao mix |

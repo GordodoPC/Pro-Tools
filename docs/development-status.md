@@ -6,7 +6,7 @@ integradas ao MIX. Builds Debug/Release e CTest **15/15** nas duas configuraçõ
 **593 verificações + dois smoke tests** por build. Tempos: 46,40 s / 20,59 s.
 Dez validações de UI passaram: Edit/Mix, MIDI, gravação, edição e masterização
 em cada configuração, com WAV real exportado e configurações reabertas.
-Artefatos: `build/phase7-final-ui-{editmix,midi,recording,advanced,mastering}-{debug,release}`.
+Artefatos: `build/phase7-delivery-ui-{editmix,midi,recording,advanced,mastering}-{debug,release}`.
 Relatório atual e limites: [phase7-report.md](phase7-report.md).
 
 Estabilização investigada: comparação de 300 s com a mesma carga passou de
@@ -14,6 +14,10 @@ Estabilização investigada: comparação de 300 s com a mesma carga passou de
 instrumentação individual. Crescimento privado foi separado de objetos vivos e
 retenção de heap/cache; não há comprovação de leak geral nem de ausência dele.
 Persistem prazos ocasionais, investigação de escalonamento e ensaios de horas.
+Na carga integrada com recursos7, a otimização FIR passou32→10 violações em300s,
+max55,757→26,244ms, CPU23,02→20,36%. **Estabilidade de prazo permanece parcial**.
+Último artefato: `build/phase7-delivery-stability-300s/stability-result.json`;
+zero new C++ observado/controle/contenção VST; private após clear88608768 bytes.
 
 Sessões atuais v7 leem v1–6. Master/plugin IO/dispositivo continuam stereo;
 matriz 5.1/7.1 está preparada. Sidechain externo opera nos DSPs nativos; buses
@@ -23,6 +27,11 @@ Medição foi validada numericamente, sem certificação ITU/EBU completa.
 Hardware de captura/MIDI físico, terceiros e audição prolongada seguem pendentes.
 
 O registro abaixo preserva a auditoria e resultados históricos da retomada.
+Executável atual: `build/ninja-release/NovaDAW_artefacts/Release/NOVA DAW.exe`;
+SHA256 `1FD56437C10993E5428216177B54CCB1D72030ACBFF2144858C19E77C2557A05`.
+Commits locais da Fase7:9ff7c27,9d759da,a3bf187,805c5e7; base anterior preservada.
+Main remota consultada novamente ao fechar:ccf7ec34bd1577bd19a9bbd57b12e53b7861c755,
+sem alteração em relação à auditoria. Nenhum conteúdo remoto substituiu arquivos locais.
 
 ## Base conferida antes das alterações
 

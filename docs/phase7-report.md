@@ -4,6 +4,12 @@ Início: 2026-10-15. Base preservada: `73f07da`, após `a8df20d`.
 Escopo autorizado em [roadmap.md](roadmap.md). Versão 0.7.0; entrega funcional
 com limitações e validações externas pendentes discriminadas abaixo.
 
+Entrega funcional validada em `805c5e7`: CTest15/15 Debug/Release,593 checks e
+dois smoke por build; dez execuções UI da entrega aprovadas. Último ensaio
+integrado300s: **10 violações de prazo**, max26,244ms, CPU20,36% de um núcleo,
+zero new C++ observado/erros de controle. Estabilidade permanece **parcial**;
+não se declara a Fase7 integralmente concluída quanto a prazos ou validação externa.
+
 ## Etapa 1 — investigação
 
 Referência anterior: 300,081 s, 35380 callbacks, 9 violações de prazo,
@@ -21,6 +27,9 @@ O critério de prazo permanece duração de render > frames/sampleRate.
 Instrumentação e armazenamento são limitados/prealocados; JSON, ordenação e
 resumos são produzidos após parar/join da thread. Contagens de memória não
 instrumentam todas as DLLs, mallocs privados ou alocações alinhadas.
+Percentis agregam os cinco tamanhos de bloco, incluindo callbacks silenciosos
+por gate/manutenção; o orçamento é individual por frames/rate. Gate/silêncio são
+publicados à parte para não confundir pouco trabalho com áudio integral entregue.
 
 Ciclos são mantidos como contadores, sem convertê-los em tempo: a frequência
 pode variar, conforme a [documentação Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/realtimeapiset/nf-realtimeapiset-querythreadcycletime).
@@ -177,7 +186,7 @@ Referência algorítmica: [ITU-R BS.1770-5](https://www.itu.int/dms_pubrec/itu-r
 Coeficientes de 48 kHz são mapeados por transformação bilinear para o rate ativo.
 True Peak é estimado por FIR sinc/Blackman 4x, 32 taps por fase; o exportador
 esvazia os 32 samples restantes do detector. Crest e PLR mostram dinâmica;
-FFT 2048/Hann alimenta espectro de 1024 bins na thread de controle.
+FFT 2048/Hann da soma mono alimenta espectro de 1024 bins na thread de controle.
 
 Render só filtra/acumula e publica em filas SPSC prealocadas. FFT, histórico e
 gating integrado ficam no controle/worker. Limites: 256 energias pendentes,
@@ -261,6 +270,12 @@ Zero C++ new observado/controle/contenção VST, zero overflow de medição/auto
 integrada-24,075LUFS/TruePeak-21,333dBTP, 11 recalculos de latência.
 Gate804/manutenção3778; todas as violações com ação0 na entrada/saída.
 
+LUFS/TP e drops do medidor nesse JSON são o estado final desde seu último Reset
+(o teste troca sample rate e recarrega sessão periodicamente); não representam
+LUFS acumulada nem contador de drops preservado através de todos os resets dos
+300s. Automação mantém seu contador de overflow; probes de render/tempo cobrem
+o ensaio inteiro. Essa distinção também se aplica à execução integrada seguinte.
+
 Essa carga opt-in acrescentou grupos/VCA, dois sidechains nativos, captura
 Write/Touch/Latch e medidor ao workload de32 faixas/3buses/10VST3; não substitui
 nem é a mesma carga da comparação4→2. `passed=true` valida finitude/estado/
@@ -309,3 +324,95 @@ Realtek48k/480, zero overrun nas cenas curtas medidas:
 
 Gravação UI usa entradas simuladas e WAVs reais, MIDI usa instrumento próprio
 real com saída de dispositivo; nenhuma validação física de entrada é inferida.
+
+## Reprodução e entrega
+
+Compilar/CTest Debug e Release: presets e comandos no [README](../README.md).
+Ensaio integrado: executar NovaStabilityTests com argumentos pasta, caminho do
+NOVA Test Gain.vst3, `300 phase7`; sem `phase7` conserva a carga histórica.
+UI de masterização: `NOVA DAW.exe --validate-mastering-ui "pasta nova"`.
+Rode um processo de validação por vez. Artefatos em build não são versionados.
+
+Executável Release validado:
+`build/ninja-release/NovaDAW_artefacts/Release/NOVA DAW.exe`.
+SHA256: `1FD56437C10993E5428216177B54CCB1D72030ACBFF2144858C19E77C2557A05`.
+Debug: `build/ninja-debug/NovaDAW_artefacts/Debug/NOVA DAW.exe`.
+SHA256: `4E06CA6CFCA555F00D686E7BEE83A025AAA4799992CC551FF99F6E701F5A2486`.
+Conserve NovaPluginScanner.exe ao lado do aplicativo e fontes/cache de sessões.
+Nenhum instalador ou instalação global foi criado.
+
+Commits locais validados: `9ff7c27` instrumentação/EQ/PDC, `9d759da` automação,
+`a3bf187` mixagem profissional, `805c5e7` medição/masterização/exportação/UI.
+Os commits `a8df20d` e `73f07da` foram preservados. Sem push, reset, rebase,
+instalação de dependências/plugins ou alteração global.
+
+## Situação funcional e pendências
+
+| Área | Situação | Limites/pendências |
+|---|---|---|
+| Estabilidade | Investigação/correções executadas; estabilização parcial | Ainda há overruns; sem trace ETW causal ou ensaio de horas |
+| Automação | Implementada/testada em faixas e Aux, volume/pan/inserts | Captura30Hz, um gesto Touch/faixa; Master/sends não têm lanes; gestos de editor externo pendentes |
+| Grupos/sends/Solo Safe | Implementados/testados/persistidos | Oito VCA/oito grupos; dois sends por canal |
+| Sidechain/PDC | Implementado/testado no Compressor/Gate nativo | Auxiliar VST3/destino instrumento não habilitados |
+| Multicanal | Preparação implementada/testada em matriz | IO/render/dispositivo stereo; surround físico pendente |
+| Medição/exportação | Implementadas/testadas com áudio e WAV reais | FIR4x estimada, sem certificação completa; sem limiter/caudas automáticas |
+| MIX/persistência/regressão | Painéis reais e sessão v7 validados | Roteiro manual amplo, terceiros e entradas físicas pendentes |
+
+O código foi desenvolvido para o projeto existente, sem copiar implementação
+proprietária. A ausência de plugins externos não bloqueou recursos independentes.
+As pendências acima não são declaradas concluídas pelos testes automatizados.
+
+Roteiro manual ainda pendente: abrir cópia de sessão antiga e conferir áudio/
+roteamento ao salvar v7; gravar gestos Touch/Write/Latch em material musical;
+ouvir suavidade de curvas/grupos e compressor com key; conferir ganho/Solo Safe
+em sessões grandes; comparar WAVs normalizados em medidor independente e ouvir
+dither em material de baixo nível. Testar captura/MIDI físico e desconexão com
+hardware disponível, além de horas de playback com contadores de prazo ativos.
+Investigar escalonamento com trace de CPU/DPC/ISR e medição independente de
+alocadores de DLLs antes de afirmar cumprimento hard real-time ou ausência de leak.
+
+## Comparação integrada final após FIR SIMD
+
+Artefato: `build/phase7-delivery-stability-300s/stability-result.json`, executado
+após o commit805c5e7, sem builds/CTest/UI concorrentes. Mesma opção `300 phase7`,
+mesmo orçamento individual, sem alterar duração, filtros ou tolerâncias.
+41 checks de estabilidade passaram; `passed=true` é aceite funcional.
+
+| Métrica, carga integrada Fase7 | FIR anterior | FIR SIMD |
+|---|---:|---:|
+| Duração s | 300,090 | 300,083 |
+| Callbacks / samples | 35379 / 13818404 | 35375 / 13817475 |
+| Violações de prazo | **32** | **10** |
+| Máximo ms | 55,757 | 26,244 |
+| P50 / P95 / P99 us | 1068 / 5205 / 6933 | 1002 / 4506 / 6584 |
+| CPU processo % de um núcleo | 23,02 | 20,36 |
+| CPU thread render s | 61,359 | 54,813 |
+| Gate / manutenção | 804 / 3778 | 594 / 4100 |
+| New C++ observado / erros controle / contenção VST | 0 / 0 / 0 | 0 / 0 / 0 |
+| Private inicial / final bytes | 92631040 / 110497792 | 92938240 / 112209920 |
+| Private após clear bytes | 91865088 | 88608768 |
+| C++ vivos, amostra0 / 300 bytes | 8472166 / 8522711 | 8472182 / 8523723 |
+
+Pico privado final112623616 bytes; engine buffers conhecidos1896032→1834136,
+após clear335928. C++ após clear3574386 bytes/846 objetos, incluindo estruturas
+do próprio teste. Private caiu23601152 bytes ao limpar; crescimento de C++ nas
+amostras foi51541 bytes/353 objetos, coerente com histórico de medições/controle.
+Retenção privada não corresponde a19MB de objetos vivos instrumentados;
+isso não exclui leaks estrangeiros ou de longa duração.
+
+Treze recalculos de latência, samples finitos, overflow de timings0 e automação0.
+Estado final do medidor após seu último Reset: LUFS I-24,071/TP-21,338dBTP,
+drops0 (limite de interpretação já registrado acima). Todas as dez violações
+tinham ação0 na entrada/saída. Maior caso:198,959s,480frames/44100Hz,
+wall26244us/orçamento10884,354us, despertar8610,470us atrasado,12014421 ciclos.
+Não se convertem ciclos em tempo; preempção é hipótese, não conclusão causal.
+O marcador controlAction cobre sends/grafo, rate, save/load e editor de plugins;
+service/gestos de automação não recebem um código próprio. Valor0 não prova
+ausência de toda atividade concorrente de controle; gate é contado separadamente.
+
+O microbenchmark e a redução de CPU sustentam a redução de trabalho da FIR.
+Variação de escalonamento/gates e os dez atrasos impedem declarar estabilidade
+de prazo resolvida. Os quatro ensaios instrumentados são mantidos em suas pastas;
+a comparação histórica4→2 e a integrada32→10 têm cargas diferentes entre si.
+Próximos passos de estabilização: trace CPU/DPC/ISR, horas com dispositivo real,
+contagem de drops preservada através de resets e probes de alocadores externos.

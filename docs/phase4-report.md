@@ -136,5 +136,5 @@ tempo final 90 BPM. Artefatos:
 MIDI/SMF/concorrência e instrumento VST3i próprio continuam aprovados. UI MIDI passou em ambas as configurações com áudio de saída Realtek; entrada MIDI física/terceiros continuam pendentes.
 Sessão v7 lê v1–6 e conserva os recursos desta fase. Regressão final CTest
 15/15 Debug (46,40s) e Release (20,59s), 593 checks+dois smoke por build.
-Artefatos UI: `build/phase7-final-ui-*-{debug,release}`. Novas funções e
+Artefatos UI: `build/phase7-delivery-ui-*-{debug,release}`. Novas funções e
 limites em [phase7-report.md](phase7-report.md).

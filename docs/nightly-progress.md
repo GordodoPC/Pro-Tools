@@ -182,3 +182,21 @@
   ring espelhado manteve fases/taps e passou35checks, mediana43,0453us (~70%
   menor wall time isolado). Sem relaxar critérios. UI corrigida Debug/Release
   passou; rebuilds completos passaram e regressão/novo300s serão registrados.
+
+## 2026-10-15 — entrega 0.7.0 validada
+
+- Implementação de masterização/UI no commit local805c5e7, após9ff7c27,
+  9d759da,a3bf187; a8df20d/73f07da preservados. Sem push/reset/rebase/instalação.
+- CTest final após FIR/UI:15/15 Debug46,40s e Release20,59s,593checks+2smoke
+  por build. Dez UIs de entrega passaram em build/phase7-delivery-ui-*.
+- Ensaio final sem builds/testes/UI concorrentes:300,083s,35375callbacks,
+  13817475samples,10overruns,max26,244ms,P50/P95/P99 1002/4506/6584us,
+  CPU20,36%, renderCPU54,813s, zero new C++ observado/controle/contenção VST;
+  13recalculos de latência, gate594/manutenção4100. Funcionalmente aprovado,
+  **estabilização de prazo parcial**, sem hard real-time certificado.
+- Private92938240→112209920,pico112623616, após clear88608768; C++ amostra0/300
+  8472182/8523723 bytes. Artefato build/phase7-delivery-stability-300s.
+  Medidor final drops0 é desde último Reset; não acumula entre trocas de rate/sessão.
+- Release:build/ninja-release/NovaDAW_artefacts/Release/NOVA DAW.exe;
+  SHA2561FD56437C10993E5428216177B54CCB1D72030ACBFF2144858C19E77C2557A05.
+  Resultados/cargas/limitações/roteiro manual no phase7-report.md.

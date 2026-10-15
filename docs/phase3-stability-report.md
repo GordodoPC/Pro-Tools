@@ -356,9 +356,20 @@ Private94027776→111779840, após clear95019008 bytes; C++ vivos nas amostras
 de preempção ou leak de todos os alocadores. Os limites de prazo não mudaram.
 
 Callback real Realtek48k/480 instrumentado opcionalmente, desligado por padrão:
-UI final0.7 Debug Edit/Mix/MIDI/Master registrou481/188/136 callbacks,
-max4,5811/1,7502/3,8105ms; Release376/142/84, max0,2677/0,1469/0,2480ms,
+UI final0.7 Debug Edit/Mix/MIDI/Master registrou474/183/114 callbacks,
+max4,2276/1,6555/1,6910ms; Release373/138/84, max0,3226/0,1568/0,1367ms,
 zero overrun nas seis cenas curtas. Essas cenas não equivalem à carga sintética
 de32 faixas. Testes completos finais15/15 em ambas configurações,593checks+2smoke.
 O medidor novo não aloca no render nos probes; histórico/FFT ficam no controle.
 Dados e ensaio integrado distinto da Fase7 em [phase7-report.md](phase7-report.md).
+
+Fechamento integrado do commit805c5e7: após reduzir custo da FIR True Peak com
+SSE2/double e histórico prealocado, mesma carga `300 phase7` passou32→10
+violações (max55,757→26,244ms), CPU23,02→20,36% de um núcleo. Último300,083s,
+35375callbacks/13817475samples, P50/P95/P99 1002/4506/6584us, zero new C++
+observado/controle/contenção VST, gate594/manutenção4100. **Prazos não resolvidos**.
+Private92938240→112209920, após clear88608768; C++ nas amostras0/300
+8472182/8523723 bytes. Após clear3574386 bytes/846objetos, buffers335928.
+Artefato `build/phase7-delivery-stability-300s/stability-result.json`; não é
+hardware nem a carga histórica da comparação4→2. Estado final de medidor reinicia
+nas trocas de rate/sessão; não se declara contador acumulado de drops entre resets.
