@@ -77,3 +77,30 @@
 
 - Entrega Fase 6 testada no commit local `0f7f605`; Fase 5 `811ffeb`, Fase 4
   `86b44d5`. Relatórios/evidências atualizados; nenhum push remoto executado.
+
+## 2026-10-15 — retomada no computador original
+
+- Antes de editar: lidos AGENTS/README, roadmap e todos os relatórios anteriores;
+  Git limpo, HEAD `ccf7ec3` igual à main consultada por `git ls-remote`.
+- Base recompilada Debug/Release: CTest inicial 12/12, 41,47 s / 19,96 s.
+  Auditoria e estado de cada fase em [development-status.md](development-status.md).
+- Corrigida recuperação repetida com faixa cheia e contagem de manifesto
+  duplicado; 43 verificações de gravação. Material novo no limite continua recusado.
+- Corrigido encerramento de transporte no bounce cancelado/com erro, mudança
+  de latência no último bloco e fault mascarado por bypass automático;
+  60 verificações offline. Bypass explícito e fontes originais preservados.
+- Falhas de faixa cheia, cancelamento, latência e exceção reproduzidas antes de
+  corrigir. Latência/exceção síncronas usam fixture interna; integração mantém
+  VST3/VST3i próprios reais. Nenhuma certificação externa adicionada.
+- Builds finais Debug/Release aprovados; CTest **12/12**, **36,78 s / 20,43 s**,
+  **513 verificações + dois smoke tests** por configuração, zero new observado
+  nos probes existentes de render/captura/fades/preview.
+- Oito execuções de UI aprovadas, em sequência: Edit/Mix, MIDI, gravação e
+  edição avançada × Debug/Release. Evidências em
+  `build/resume-20261015-ui-{editmix,midi,recording,advanced}-{debug,release}`.
+  Saída Realtek 48000 Hz/480 samples; captura simulada, MIDI físico não testado.
+- Ensaio Release de 300 s iniciado separadamente depois de builds/CTest/UI;
+  resultado será registrado ao terminar. Hardware, terceiros, qualidade
+  perceptual e ensaios de horas continuam pendentes. Fase 7 sem escopo funcional
+  definido no roadmap atual; preparação e contratos registrados na auditoria.
+- Nenhum push/reset/rebase, instalação de dependências/plugins ou alteração global.

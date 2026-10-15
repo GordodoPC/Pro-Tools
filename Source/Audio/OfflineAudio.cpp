@@ -70,12 +70,25 @@ std::unique_ptr<AudioEngine> OfflineAudio::snapshot(const AudioEngine& engine,co
 bool OfflineAudio::bounce(AudioEngine& engine,double start,double end,const juce::File& destination,juce::String& error,const std::atomic<bool>* cancel,std::atomic<float>* progress){
     error.clear();if(!std::isfinite(start)||!std::isfinite(end)||start<0||end<=start||end>engine.duration()+1e-8||end>86400||!engine.pdcValid()){error="Intervalo de bounce invalido.";return false;}
     if(destination.existsAsFile()||!destination.getParentDirectory().createDirectory().wasOk()){error="Escolha novo arquivo WAV.";return false;}juce::TemporaryFile temporary(destination);auto output=writer(temporary.getFile(),engine.sampleRate(),2,error);if(!output)return false;
-    engine.loopEnabled=false;engine.metronomeEnabled=false;engine.seek(start);engine.play();const int latency=engine.latencySamples();const int64_t frames=std::llround((end-start)*engine.sampleRate());if(frames<1||frames*8>=0xffff0000ull){error="Bounce excede RIFF classico.";return false;}juce::AudioBuffer<float> block(2,mixBlockSize);int64_t rendered=0;
-    auto healthy=[](const MixProcessor* p){return !p||p->bypass||(!p->faulted&&(!p->plugin||!p->plugin->isSuspended())&&p->contentionDropouts()==0&&!(p->kind==EffectKind::vst3&&!p->plugin));};
+    engine.loopEnabled=false;engine.metronomeEnabled=false;engine.seek(start);engine.play();
+    // This runs on the offline worker, after render returns. Every exit must
+    // stop/reset the independent engine, including cancellation and disk errors.
+    struct StopTransport {AudioEngine& engine;~StopTransport(){engine.stop();}} stopTransport{engine};
+    const int latency=engine.latencySamples();const int64_t frames=std::llround((end-start)*engine.sampleRate());if(frames<1||frames*8>=0xffff0000ull){error="Bounce excede RIFF classico.";return false;}juce::AudioBuffer<float> block(2,mixBlockSize);int64_t rendered=0;
+    auto healthy=[](const MixProcessor* p){
+        if(!p)return true;
+        // process() enables bypass on an exception. That fallback must not hide
+        // a fault and publish a successful render with unintended dry audio.
+        if(p->faulted)return false;
+        return p->bypass||((!p->plugin||!p->plugin->isSuspended())&&p->contentionDropouts()==0&&!(p->kind==EffectKind::vst3&&!p->plugin));
+    };
     while(rendered<frames+latency){if(cancelled(cancel,error))return false;if(engine.needsMaintenance()){error="Latencia do plugin mudou durante bounce; tente novamente com estado estabilizado.";return false;}const int size=int(std::min<int64_t>(mixBlockSize,frames+latency-rendered));engine.render(block.getArrayOfWritePointers(),2,size);
+        // A plugin may report a change while processing the very last block.
+        // Validate before writing it, even when there will be no next iteration.
+        if(engine.needsMaintenance()){error="Latencia do plugin mudou durante bounce; tente novamente com estado estabilizado.";return false;}
         for(int i=0;i<engine.trackCount();++i){if(!healthy(engine.track(i).instrument.get())){error="Instrumento indisponivel/falhou no bounce.";return false;}for(auto& p:engine.track(i).inserts)if(!healthy(p.get())){error="Insert indisponivel/falhou no bounce.";return false;}}for(auto& p:engine.masterInserts)if(!healthy(p.get())){error="Master insert indisponivel/falhou no bounce.";return false;}
         const int skip=int(std::clamp<int64_t>(latency-rendered,0,size));if(size>skip&&!output->writeFromAudioSampleBuffer(block,skip,size-skip)){error="Erro de escrita no bounce.";return false;}rendered+=size;if(progress)*progress=float(double(rendered)/(frames+latency));
     }
-    engine.stop();output.reset();return !cancelled(cancel,error)&&publish(temporary,destination,error);
+    output.reset();return !cancelled(cancel,error)&&publish(temporary,destination,error);
 }
 }

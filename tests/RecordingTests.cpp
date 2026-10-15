@@ -39,6 +39,31 @@ int main(int argc,char** argv){juce::ScopedJuceInitialiser_GUI gui;try{
     expect(!recorder.start(dir,1,{},error),"unavailable selected input is rejected before capture");
     nova::AudioEngine recovery;recovery.setOutputRate(48000);nova::AudioRecorder recoveryRecorder(recovery);
     expect(recoveryRecorder.recover(failed.captureDirectory(),error)&&recovery.track(0).regions[0].asset->samples.getNumSamples()==256,"recovery manifest restores valid WAV prefix without modifying source file");
+    {
+        nova::AudioEngine::MutationGuard guard(recovery);
+        const auto take=recovery.track(0).takes.front();
+        while(recovery.track(0).takes.size()<128){auto copy=take;copy.id=recovery.newRegionId();recovery.track(0).takes.push_back(copy);}
+    }
+    const auto recoveredRegion=recovery.track(0).regions.front().id;
+    expect(recoveryRecorder.recover(failed.captureDirectory(),error)&&recovery.track(0).takes.size()==128&&recovery.track(0).regions.front().id==recoveredRegion,"recovery is idempotent even when existing track has reached take limit");
+    const auto duplicateFolder=dir.getChildFile("duplicate-recovery-"+juce::Uuid().toString());duplicateFolder.createDirectory();
+    const auto duplicateWav=duplicateFolder.getChildFile("track-1-take-1.wav");expect(failed.captureDirectory().getChildFile("track-1-take-1.wav").copyFileTo(duplicateWav),"prepare duplicate-entry manifest using preserved recorded WAV");
+    auto duplicateManifest=juce::JSON::parse(failed.captureDirectory().getChildFile("recovery.json").loadFileAsString());
+    const auto duplicateEntry=duplicateManifest["files"].getArray()->getReference(0);duplicateManifest["files"].getArray()->add(duplicateEntry);
+    duplicateFolder.getChildFile("recovery.json").replaceWithText(juce::JSON::toString(duplicateManifest));
+    nova::AudioEngine duplicateRecovery;duplicateRecovery.setOutputRate(48000);duplicateRecovery.addAudioTrack("Almost full",error);
+    {
+        nova::AudioEngine::MutationGuard guard(duplicateRecovery);
+        auto take=recovery.track(0).takes.front();
+        for(int n=0;n<127;++n){take.id=duplicateRecovery.newRegionId();duplicateRecovery.track(0).takes.push_back(take);}
+    }
+    nova::AudioRecorder duplicateRecorder(duplicateRecovery);
+    expect(duplicateRecorder.recover(duplicateFolder,error)&&duplicateRecovery.track(0).takes.size()==128&&duplicateRecovery.track(0).regions.size()==1,"duplicate manifest entries consume a single available take slot");
+    expect(duplicateRecorder.recover(duplicateFolder,error)&&duplicateRecovery.track(0).takes.size()==128,"repeating duplicate-entry recovery preserves full take list");
+    const auto additionalWav=duplicateFolder.getChildFile("track-1-take-2.wav");duplicateWav.copyFileTo(additionalWav);
+    auto additionalEntry=juce::JSON::parse(juce::JSON::toString(duplicateEntry));additionalEntry.getDynamicObject()->setProperty("file",additionalWav.getFileName());duplicateManifest["files"].getArray()->add(additionalEntry);
+    duplicateFolder.getChildFile("recovery.json").replaceWithText(juce::JSON::toString(duplicateManifest));const auto fullRegion=duplicateRecovery.track(0).regions.front().id;
+    expect(!duplicateRecorder.recover(duplicateFolder,error)&&duplicateRecovery.track(0).takes.size()==128&&duplicateRecovery.track(0).regions.front().id==fullRegion&&additionalWav.existsAsFile(),"genuinely new take at capacity is rejected before modifying recovered arrangement or sources");
     nova::AudioEngine stereo;stereo.setOutputRate(48000);stereo.setSmoothingTime(0);stereo.addAudioTrack("Stereo",error);stereo.track(0).recordArm=true;stereo.track(0).recordStereo=true;stereo.track(0).recordGain=0.5f;nova::AudioRecorder stereoRecorder(stereo);stereo.attachRecorder(&stereoRecorder);
     expect(stereoRecorder.start(dir,2,{},error),"start stereo capture with per-track digital gain");input(stereo,257);expect(stereoRecorder.stop(error)&&stereo.track(0).regions[0].asset->samples.getNumChannels()==2,"stereo WAV preserves both selected channels at odd buffer boundary");
     expect(std::abs(stereo.track(0).regions[0].asset->samples.getSample(0,0)-0.05f)<1e-6&&std::abs(stereo.track(0).regions[0].asset->samples.getSample(1,0)-0.1f)<1e-6,"software capture gain affects both channels");

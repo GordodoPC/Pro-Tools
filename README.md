@@ -19,6 +19,8 @@ Gravação: [docs/phase5-report.md](docs/phase5-report.md).
 Resultados MIDI: [docs/phase4-report.md](docs/phase4-report.md).
 Estabilização: [docs/phase3-stability-report.md](docs/phase3-stability-report.md);
 histórico: [docs/phase3-report.md](docs/phase3-report.md).
+Retomada em 2026-10-15, comparação com GitHub e situação das fases:
+[docs/development-status.md](docs/development-status.md).
 
 ## Compilar no Windows
 
@@ -87,7 +89,8 @@ saída Master stereo/L/R funcionam em Edit/Mix; os masters ficam sincronizados.
 Em MIX, **+ Aux stereo** e **+ Bus mono** criam returns/buses. A saída escolhe
 Master stereo/L/R ou um Aux. Ciclos são rejeitados. Cada slot de send abre
 seleção de destino, pré/pós-fader e nível em dB. A entrada das faixas vem da
-timeline e a dos buses vem das conexões. Record Arm ainda não tem suporte.
+timeline e a dos buses vem das conexões. Record Arm das faixas de áudio está
+disponível no painel de gravação; faixas MIDI têm arm no Piano Roll.
 
 Os quatro slots de insert oferecem NOVA EQ, Compressor, Gate, Delay e Reverb,
 editor, bypass e remoção. **Scan VST3** pesquisa os locais padrão do Windows
@@ -97,8 +100,9 @@ de teste, selecione `build/ninja-debug/NovaTestGain_artefacts/Debug/VST3`.
 A lista aparece no submenu VST3 dos inserts. O scanner usa processos filhos,
 com timeout de 20 segundos por módulo. Conserve `NovaPluginScanner.exe` ao lado
 de `NOVA DAW.exe`. Lista e blacklist são guardadas em `.nova-plugin-list.xml`;
-uma nova varredura tenta novamente os módulos. Somente efeitos com um bus
-stereo de entrada/saída são aceitos. Plugins não encontrados preservam
+uma nova varredura tenta novamente os módulos. Efeitos exigem um bus
+stereo de entrada/saída; instrumentos exigem MIDI, saída stereo e zero entradas
+de áudio ativas. Plugins não encontrados preservam
 slot/estado, deixam o sinal seco passar com o último atraso conhecido e mostram `[ausente]`.
 **Plugins** exibe fabricante, versão, caminho e blacklist; permite remover
 descrições da lista ou limpar falhas. Isso preserva os módulos instalados e
@@ -269,3 +273,21 @@ Validações opcionais da interface (um processo por vez):
 
 Esses modos criam fixtures/sessões e `ui-result.json` nos diretórios indicados e
 fecham o aplicativo. Não validam gravação física ou plugins de terceiros.
+
+## Regressões de recuperação e bounce
+
+Após compilar, execute nas duas configurações:
+
+```powershell
+.\scripts\dev-shell.cmd ctest --preset windows-ninja-debug -R AudioRecordingAndTakes
+.\scripts\dev-shell.cmd ctest --preset windows-ninja-debug -R AdvancedAudioEditing
+.\scripts\dev-shell.cmd ctest --preset windows-ninja-release -R AudioRecordingAndTakes
+.\scripts\dev-shell.cmd ctest --preset windows-ninja-release -R AdvancedAudioEditing
+```
+
+Incluem recuperação repetida/manifesto duplicado no limite de 128 takes,
+preservação do arranjo/fontes, cancelamento/erro do bounce, transição de latência
+no último bloco e exceção com bypass automático. Transições são injetadas por
+fixture interna controlada; os testes também processam os VST3/VST3i reais próprios.
+O bounce abortado não publica WAV parcial e encerra seu transporte offline.
+Notificações externas que chegam depois do render continuam fora dessa garantia.

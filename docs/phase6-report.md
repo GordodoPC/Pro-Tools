@@ -168,3 +168,29 @@ Regressões MIDI/recording da UI passaram; hardwareInput=false/physicalMidi=fals
 
 Commits locais de entrega: Fase 4 `86b44d5`, Fase 5 `811ffeb`, Fase 6 `0f7f605`.
 Escopo oficial: roadmap-phases-4-6.md; diretrizes AGENTS.md. Sem push remoto.
+
+## Retomada — 2026-10-15: falhas e encerramento de bounce
+
+Corrigidos três casos reproduzidos por regressões:
+
+- Cancelamento/erro deixava o transporte offline em execução. Uma guarda de
+  escopo agora para/reseta o engine independente em toda saída após Play,
+  fora do callback; temporários continuam sendo removidos pelo job.
+- Latência reportada durante o último bloco não era conferida novamente.
+  O worker verifica manutenção também depois de cada render, antes de escrever.
+- Exceção de processamento ativava bypass automático e podia fazer o teste de
+  saúde aceitar um WAV com sinal seco como render bem-sucedido. Fault agora tem
+  precedência sobre bypass; o WAV parcial não é publicado. Bypass explícito de
+  insert ausente mantém a passagem seca compensada e tem regressão própria.
+
+Transições síncronas de latência/exceção são injetadas por fixture JUCE interna
+no teste; não se trata de comprovação de falha nativa ou notificação assíncrona
+arbitrária de VST3 externo. Os testes existentes continuam processando módulos
+VST3/VST3i próprios reais e verificando o áudio e a PDC de 55 samples.
+Notificações que só chegam após terminar o render continuam fora dessa garantia.
+
+AdvancedAudioEditing: **60 verificações**. CTest final Debug **12/12 (36,78 s)**
+e Release **12/12 (20,43 s)**; total **513 verificações + dois smoke tests** por
+configuração. Originais continuam conferidos byte-for-byte. Nenhuma mudança de
+algoritmo stretch/pitch, formato de sessão ou callback de áudio neste ciclo.
+Qualidade perceptual, sessões longas, IO adverso real e terceiros seguem pendentes.

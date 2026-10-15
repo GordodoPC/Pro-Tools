@@ -14,6 +14,31 @@ void* operator new(size_t size){if(failNextAllocation){failNextAllocation=false;
 void operator delete(void* p)noexcept{std::free(p);}
 void operator delete(void* p,size_t)noexcept{std::free(p);}
 namespace {int checks=0;void expect(bool ok,const char* text){if(!ok)throw std::runtime_error(text);++checks;std::cout<<"PASS: "<<text<<'\n';}
+// In-process host fixture for synchronous failure/latency transitions. The VST3
+// integration tests below still load and process the real original modules.
+class TransitionPlugin final : public juce::AudioPluginInstance {
+public:
+    explicit TransitionPlugin(bool fail):AudioPluginInstance(BusesProperties().withInput("In",juce::AudioChannelSet::stereo(),true).withOutput("Out",juce::AudioChannelSet::stereo(),true)),failure(fail){}
+    const juce::String getName()const override{return "Offline transition fixture";}
+    void fillInPluginDescription(juce::PluginDescription&)const override{}
+    void prepareToPlay(double,int)override{setLatencySamples(0);}
+    void releaseResources()override{}
+    void processBlock(juce::AudioBuffer<float>&,juce::MidiBuffer&)override{if(failure)throw std::runtime_error("injected process failure");setLatencySamples(17);}
+    bool acceptsMidi()const override{return false;}
+    bool producesMidi()const override{return false;}
+    double getTailLengthSeconds()const override{return 0;}
+    bool hasEditor()const override{return false;}
+    juce::AudioProcessorEditor* createEditor()override{return nullptr;}
+    int getNumPrograms()override{return 1;}
+    int getCurrentProgram()override{return 0;}
+    void setCurrentProgram(int)override{}
+    const juce::String getProgramName(int)override{return {};}
+    void changeProgramName(int,const juce::String&)override{}
+    void getStateInformation(juce::MemoryBlock&)override{}
+    void setStateInformation(const void*,int)override{}
+private:
+    bool failure;
+};
 std::shared_ptr<nova::Clip> tone(const juce::File& file,float level=0.1f,bool constant=false){juce::WavAudioFormat format;auto stream=file.createOutputStream();stream->setPosition(0);stream->truncate();juce::AudioBuffer<float> signal(1,48000);for(int i=0;i<48000;++i)signal.setSample(0,i,constant?level:level*float(std::sin(2*juce::MathConstants<double>::pi*440*i/48000)));{std::unique_ptr<juce::AudioFormatWriter> writer(format.createWriterFor(stream.release(),48000,1,24,{},0));writer->writeFromAudioSampleBuffer(signal,0,48000);}juce::String error;return std::shared_ptr<nova::Clip>(nova::AudioEngine::loadWav(file,error));}
 std::unique_ptr<nova::MixProcessor> delayed(const juce::PluginDescription& description,int samples){juce::String error;auto p=nova::MixProcessor::loadPlugin(description,48000,error);if(!p||!p->plugin)throw std::runtime_error(error.toStdString());p->setParameter(0,1);p->setParameter(1,float(samples)/2048);juce::AudioBuffer<float> warm(2,1);warm.clear();juce::MidiBuffer midi;p->plugin->processBlock(warm,midi);p->plugin->releaseResources();p->plugin->prepareToPlay(48000,256);p->prepare(48000);return p;}
 double frequency(const nova::Clip& clip){const int begin=int(0.2*clip.sampleRate),end=std::min(clip.samples.getNumSamples(),int(0.7*clip.sampleRate));int crossings=0;for(int n=begin+1;n<end;++n)if(clip.samples.getSample(0,n-1)<=0&&clip.samples.getSample(0,n)>0)++crossings;return crossings*clip.sampleRate/(end-begin);}
@@ -49,6 +74,19 @@ int main(int argc,char** argv){juce::ScopedJuceInitialiser_GUI gui;try{expect(ar
     auto offlineGraph=nova::OfflineAudio::snapshot(graph,dir,error);expect(offlineGraph&&offlineGraph->latencySamples()==55,"offline snapshot preserves VST3 state and accumulated track bus Master PDC");const auto graphFile=dir.getChildFile("graph-bounce.wav");expect(nova::OfflineAudio::bounce(*offlineGraph,0,1,graphFile,error),"bounce real VST3 graph including pre-fader send and Read automation");auto graphResult=nova::AudioEngine::loadWav(graphFile,error);expect(graphResult&&std::abs(graphResult->samples.getSample(0,0)-0.25f*float(std::sqrt(0.5)))<1e-5&&graphResult->samples.getMagnitude(1,47999)<1e-6,"offline PDC removes leading latency and aligns known summed impulse at sample zero");
     juce::OwnedArray<juce::PluginDescription> synthDescriptions;vstFormat.findAllTypesForFile(synthDescriptions,juce::String::fromUTF8(argv[3]));expect(synthDescriptions.size()==1&&synthDescriptions[0]->isInstrument,"discover own virtual instrument for offline MIDI bounce");nova::AudioEngine instrument;instrument.setOutputRate(48000);instrument.addMidiTrack("Offline instrument",error);instrument.track(0).instrument=nova::MixProcessor::loadPlugin(*synthDescriptions[0],48000,error);instrument.track(0).midiClips[0].length=nova::midiPpq*2;instrument.track(0).midiClips[0].notes.push_back({instrument.newRegionId(),0,nova::midiPpq,69,100,1});instrument.rebuildMidi(0,error);instrument.prepareProcessors();auto synthSnapshot=nova::OfflineAudio::snapshot(instrument,dir,error);const auto instrumentFile=dir.getChildFile("instrument-bounce.wav");const bool synthBounced=synthSnapshot&&nova::OfflineAudio::bounce(*synthSnapshot,0,1,instrumentFile,error);auto instrumentAudio=synthBounced?nova::AudioEngine::loadWav(instrumentFile,error):nullptr;expect(instrumentAudio&&instrumentAudio->samples.getMagnitude(0,24000)>0.01f,"offline MIDI notes through actual VST3i generate nonzero WAV audio");
     std::atomic<bool> bounceCancelled{true};const auto cancelledFile=dir.getChildFile("cancelled-bounce.wav");expect(!nova::OfflineAudio::bounce(*offlineGraph,0,1,cancelledFile,error,&bounceCancelled)&&!cancelledFile.existsAsFile(),"cancelled bounce leaves no published partial destination");
+    expect(!offlineGraph->isPlaying(),"cancelled bounce always stops its offline transport");
+    {nova::AudioEngine::MutationGuard guard(*offlineGraph);auto missingInsert=std::make_unique<nova::MixProcessor>(nova::EffectKind::vst3);offlineGraph->track(1).inserts[0]=std::move(missingInsert);offlineGraph->prepareProcessors();}
+    const auto failedBounce=dir.getChildFile("failed-bounce.wav");
+    expect(!nova::OfflineAudio::bounce(*offlineGraph,0,1,failedBounce,error)&&!failedBounce.existsAsFile()&&!offlineGraph->isPlaying(),"failed plugin bounce stops transport and never publishes partial audio");
+    offlineGraph->track(1).inserts[0]->bypass=true;const auto bypassedBounce=dir.getChildFile("bypassed-bounce.wav");
+    expect(nova::OfflineAudio::bounce(*offlineGraph,0,1,bypassedBounce,error)&&bypassedBounce.existsAsFile()&&!offlineGraph->isPlaying(),"explicit bypass of missing insert still allows compensated dry bounce");
+    for(bool fail:{false,true}){
+        nova::AudioEngine transition;transition.setOutputRate(48000);transition.addSharedClip(constant,error);
+        {nova::AudioEngine::MutationGuard guard(transition);auto processor=std::make_unique<nova::MixProcessor>(nova::EffectKind::vst3);processor->plugin=std::make_unique<TransitionPlugin>(fail);transition.track(0).inserts[0]=std::move(processor);transition.prepareProcessors();}
+        const auto destination=dir.getChildFile(fail?"process-failed-bounce.wav":"latency-changed-bounce.wav");
+        const bool published=nova::OfflineAudio::bounce(transition,0,64.0/48000,destination,error);
+        expect(!published&&!destination.existsAsFile()&&!transition.isPlaying()&&error.isNotEmpty(),fail?"process exception cannot become a successful bounce through automatic bypass":"latency change reported in final bounce block aborts publication");
+    }
     auto invalidSession=juce::JSON::parse(processed.loadFileAsString());invalidSession["tracks"].getArray()->getReference(0)["regions"].getArray()->getReference(0).getDynamicObject()->setProperty("fadeIn",999.0);const auto invalidFile=dir.getChildFile("bad-fade.novadaw");invalidFile.replaceWithText(juce::JSON::toString(invalidSession));const int originalRows=reopened.trackCount();expect(!nova::Session::load(invalidFile,reopened,error)&&reopened.trackCount()==originalRows,"invalid version 6 fade metadata rejected transactionally");
     const auto stale=*transformEdit.selected();transformEdit.move(0.1,0);expect(!transformEdit.adoptTransform(stale,pitched,1,12,0,error),"stale offline result cannot overwrite a clip edited during processing");
     auto shrunk=nova::OfflineAudio::transform(original,0.5,-12,0,dir.getChildFile("cache"),error);expect(shrunk&&shrunk->samples.getNumSamples()==24000&&std::abs(frequency(*shrunk)-220)<10,"shorter duration and octave-down transform remain finite and approximately pitched");

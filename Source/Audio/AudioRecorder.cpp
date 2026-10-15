@@ -1,6 +1,7 @@
 #include "AudioRecorder.h"
 #include "AudioEngine.h"
 #include "Midi/MidiQueue.h"
+#include <algorithm>
 #include <thread>
 #include <cmath>
 namespace nova {
@@ -103,6 +104,9 @@ bool AudioRecorder::recover(const juce::File& directory,juce::String& error){
         if(!item.isObject()||!item["track"].isInt()||!item["file"].isString()||!(item["start"].isDouble()||item["start"].isInt())){error="Entrada de recuperacao invalida.";return false;}
         const int index=int(item["track"]);const auto name=item["file"].toString();const auto file=directory.getChildFile(name);const double start=double(item["start"]);
         if(index<0||index>=64||file.getParentDirectory()!=directory||file.getFileName()!=name||!name.startsWith("track-")||!name.endsWithIgnoreCase(".wav")||!std::isfinite(start)||start<0||start>86400){error="Referencia de captura fora da pasta.";return false;}
+        // A repeated manifest entry must not reserve another take slot or decode
+        // the same source again. Track/file identifies one recovered take.
+        if(std::any_of(pending.begin(),pending.end(),[&](const auto& entry){return entry.track==index&&entry.take.file==file;}))continue;
         juce::String readError;auto clip=AudioEngine::loadWav(file,readError);if(!clip)continue;
         if(start+clip->duration()>86400){error="Captura excede timeline de 24 horas.";return false;}
         pending.push_back({index,{0,0,file,start,clip->duration(),clip->sampleRate,clip->samples.getNumChannels()}});
@@ -112,8 +116,10 @@ bool AudioRecorder::recover(const juce::File& directory,juce::String& error){
         if(++additions[item.track]+(item.track<engine.trackCount()?int(engine.track(item.track).takes.size()):0)>128){error="Limite de takes atingido; fontes permanecem na pasta.";return false;}}
     const auto group=engine.newRegionId();
     for(auto& item:pending){while(engine.trackCount()<=item.track)if(!engine.addAudioTrack("Recovered "+juce::String(engine.trackCount()+1),error))return false;auto& track=engine.track(item.track);
-        if(track.midiTrack||track.auxiliary){error="Destino de recuperacao exige faixa de audio.";return false;}if(track.takes.size()>=128){error="Limite de takes atingido; fontes permanecem na pasta.";return false;}
-        bool exists=false;for(const auto& take:track.takes)exists|=take.file==item.take.file;if(exists)continue;item.take.id=engine.newRegionId();item.take.group=group;const auto id=item.take.id;track.takes.push_back(std::move(item.take));if(!engine.activateTake(item.track,id,error))return false;
+        if(track.midiTrack||track.auxiliary){error="Destino de recuperacao exige faixa de audio.";return false;}
+        bool exists=false;for(const auto& take:track.takes)exists|=take.file==item.take.file;if(exists)continue;
+        if(track.takes.size()>=128){error="Limite de takes atingido; fontes permanecem na pasta.";return false;}
+        item.take.id=engine.newRegionId();item.take.group=group;const auto id=item.take.id;track.takes.push_back(std::move(item.take));if(!engine.activateTake(item.track,id,error))return false;
     }
     lastStatus="WAV recuperado; fontes originais preservadas";return true;
 }

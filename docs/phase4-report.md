@@ -113,3 +113,14 @@ ver [phase5-report.md](phase5-report.md) para limites e evidências.
 
 Regressão completa em 0.6.0: CTest Debug/Release 12/12; sessão v6 preserva MIDI,
 instrumento e presets. MIDI físico/terceiros continuam não validados.
+
+## Retomada — 2026-10-15
+
+Base local `ccf7ec3` conferida igual à main remota antes das alterações.
+MIDI permanece funcionalmente implementado; nenhum novo recurso MIDI é
+declarado neste ciclo. CTest final Debug **12/12 (36,78 s)** e Release
+**12/12 (20,43 s)**, mantendo os testes de dados/SMF, concorrência, instrumento
+VST3i real, captura e persistência. Total do projeto: 513 verificações e dois
+smoke tests por configuração, após regressões de recuperação/bounce.
+Entrada MIDI física, jitter/hotplug e instrumentos externos seguem pendentes.
+Auditoria e preparação das próximas etapas: [development-status.md](development-status.md).

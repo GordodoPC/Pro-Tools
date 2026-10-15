@@ -277,3 +277,23 @@ A execução anterior curta teve zero overruns. Não é substituição do ensaio
 isolado de 300 s, que registrou 7 violações de prazo; hard real-time continua sem
 certificação. Gravação física multicanal, MIDI físico e terceiros continuam pendentes.
 Nenhum módulo externo foi instalado nem feito push remoto.
+
+## Retomada e regressão — 2026-10-15
+
+Auditoria inicial: workspace limpo, HEAD `ccf7ec3` igual ao hash da main consultado
+por `git ls-remote`. Compilação/CTest anteriores às edições passaram nas duas
+configurações. Detalhes: [development-status.md](development-status.md).
+
+O ciclo corrigiu recuperação de takes e falhas/encerramento de bounce nas
+Fases 5/6. O caminho do callback, o contrato de MutationGuard, os buffers/filas,
+os patches JUCE e a PDC foram preservados. A limpeza do engine offline ocorre
+no worker depois do retorno de render. Transições síncronas de latência e
+exceção em fixture interna agora impedem a publicação de bounce incorreto.
+Isso não adiciona isolamento de falhas nativas nem certifica plugins externos.
+
+Builds Debug/Release aprovados; CTest final **12/12 em ambos**, Debug **36,78 s**,
+Release **20,43 s**. Total: **513 verificações + dois smoke tests** por build.
+Inclui regressões de PDC/lifecycle/concorrência e probes existentes do callback.
+Persistem as pendências de horas com hardware, roundtrip, terceiros e ausência
+de certificação hard real-time; uma nova execução curta não elimina os limites
+históricos do teste de 300 s nem comprova ausência de vazamentos.

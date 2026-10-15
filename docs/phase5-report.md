@@ -82,3 +82,18 @@ Regressão em 0.6.0: RecordingTests mantém 38 verificações em Debug/Release,
 com sessão atual v6 e leitura legada preservada. Recuperação fecha o worker
 interrompido antes de ler manifesto/WAV; mensagens antigas de erro são limpas
 pelas APIs. Hardware de captura continua não validado.
+
+## Retomada — 2026-10-15: recuperação no limite de takes
+
+Corrigida recuperação repetida de captura já importada em faixa com 128 takes:
+a detecção de duplicatas precede a recusa por capacidade. Manifestos com entradas
+repetidas de um mesmo arquivo/faixa passam a consumir um único slot; validação
+continua fora do callback e caminhos externos continuam recusados.
+
+RecordingTests agora executa **43 verificações**, incluindo o limite real de
+novos takes, a preservação do arranjo/fontes e idempotência com manifesto
+duplicado. O caso da faixa cheia foi reproduzido como falha antes da correção.
+CTest final Debug **12/12 (36,78 s)** e Release **12/12 (20,43 s)**.
+Não houve mudança de formato de sessão, dos limites ou do monitoramento opt-in.
+Captura permanece simulada nesses testes, com escrita/leitura de WAVs reais;
+gravação física multicanal e calibração de latência continuam pendentes.
