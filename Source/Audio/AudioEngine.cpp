@@ -83,7 +83,7 @@ bool AudioEngine::addSharedClip(std::shared_ptr<Clip> clip, juce::String& error)
 }
 void AudioEngine::clear() {
     MutationGuard mutation(*this);for(auto& route:midiIO->routes)route=0;++midiIO->generation;midiRecording=false;if(automation)automation->reset();
-    stop();stopPreview();recordingExtent=0;audioRecording=false;
+    stop();stopPreview();masteringEnabled=false;mastering->reset();stemSource=-1;exportOptions={};recordingExtent=0;audioRecording=false;
     for (auto& t : tracks) { t.regions.clear(); t.clip.reset();for(auto& p:t.inserts)p.reset();t.instrument.reset();t.midiClips.clear();t.midiEvents.clear();t.midiTrack=false;t.midiArm=false;t.vcaGroup=t.channelGroup=t.sidechainSource=-1;t.soloSafe=false;t.recordArm=false;t.monitorInput=false;t.takes.clear();t.activeTake=0;t.automation.clear();t.automationOverrideMask=0; }
     for(auto& p:masterInserts)p.reset();masterMute=false;masterClipped=false;masterPeak=masterRms=0;smoothingInitialized=false;
     count = 0; bytes = 0; recordingOptions={};masterGain = 1;compensation={};visibleLatency=0;pdcReady=true;configurationError.clear();
@@ -123,7 +123,7 @@ void AudioEngine::finishAutomation(){automation->finishAll();}
 void AudioEngine::pause(){previewPlaying=false;playing=false;midiRecording=false;audioRecording=false;midiIO->panic=true;}
 AudioEngine::AudioEngine() {
     for(int i=0;i<8;++i){vcaGroups[i].name="VCA "+juce::String(i+1);channelGroups[i].name="Grupo "+juce::String(i+1);}
-    extended=std::make_unique<MixExtensions>();automation=std::make_unique<AutomationModel>(*this);
+    extended=std::make_unique<MixExtensions>();automation=std::make_unique<AutomationModel>(*this);mastering=std::make_unique<MasteringMeter>();
     midiIO=std::make_unique<MidiIO>();
     for(auto& buffer:channelBuffers)buffer.setSize(2,mixBlockSize);for(auto& buffer:extended->detectorTaps)buffer.setSize(2,mixBlockSize);extended->detectorBuffer.setSize(2,mixBlockSize);for(auto& buffer:extended->detectorStages)buffer.setSize(2,mixBlockSize);
     masterBuffer.setSize(2,mixBlockSize);for(auto& buffer:scheduledMidi)buffer.ensureSize(8192);midiSpan.ensureSize(8192);lastMidiTime.fill(-1);setSmoothingTime(smoothingTime);
@@ -143,6 +143,7 @@ void AudioEngine::setOutputRate(double rate) {
 void AudioEngine::prepareProcessors() {
     MutationGuard mutation(*this);
     try{
+        mastering->prepare(outputRate.load());
         playheadBeats=beatsPerBar;playheadUnit=beatUnit;
         for(int i=0;i<count;++i){if(auto& instrument=track(i).instrument){instrument->prepare(outputRate);if(instrument->plugin)instrument->plugin->setPlayHead(this);}
             for(auto& insert:track(i).inserts)if(insert){insert->prepare(outputRate);if(insert->plugin)insert->plugin->setPlayHead(this);}}
@@ -160,7 +161,7 @@ uint64_t AudioEngine::contentionDropouts()const {
     for(const auto& insert:masterInserts)if(insert)total+=insert->contentionDropouts();return total;
 }
 size_t AudioEngine::ownedBufferBytes()const {
-    size_t total=size_t(bytes)+compensation.allocatedBytes+clickCompensation.bytes();
+    size_t total=mastering->ownedBytes()+size_t(bytes)+compensation.allocatedBytes+clickCompensation.bytes();
     for(const auto& buffer:channelBuffers)total+=size_t(buffer.getNumSamples())*buffer.getNumChannels()*sizeof(float);
     total+=size_t(masterBuffer.getNumSamples())*masterBuffer.getNumChannels()*sizeof(float);for(const auto& buffer:extended->detectorTaps)total+=size_t(buffer.getNumSamples())*buffer.getNumChannels()*sizeof(float);for(const auto& buffer:extended->detectorStages)total+=size_t(buffer.getNumSamples())*buffer.getNumChannels()*sizeof(float);total+=size_t(extended->detectorBuffer.getNumSamples())*extended->detectorBuffer.getNumChannels()*sizeof(float);
     for(int i=0;i<count;++i){if(track(i).instrument)total+=track(i).instrument->ownedBufferBytes();for(const auto& p:track(i).inserts)if(p)total+=p->ownedBufferBytes();}
@@ -178,7 +179,7 @@ void AudioEngine::replaceSession(AudioEngine& other) {
         dst.peak=dst.rms=0;dst.clipped=false;dst.inserts=std::move(src.inserts);dst.automation=std::move(src.automation);dst.automationMode=src.automationMode;
         for(int j=0;j<2;++j){dst.sends[j].pan=src.sends[j].pan.load();dst.sends[j].width=src.sends[j].width.load();dst.sends[j].mute=src.sends[j].mute.load();dst.sends[j].target=src.sends[j].target;dst.sends[j].preFader=src.sends[j].preFader;dst.sends[j].gain=src.sends[j].gain.load();}
     }
-    for(int i=0;i<8;++i){vcaGroups[i].name=other.vcaGroups[i].name;vcaGroups[i].gain=other.vcaGroups[i].gain.load();vcaGroups[i].mute=other.vcaGroups[i].mute.load();channelGroups[i].name=other.channelGroups[i].name;channelGroups[i].gain=other.channelGroups[i].gain.load();channelGroups[i].mute=other.channelGroups[i].mute.load();channelGroups[i].solo=other.channelGroups[i].solo.load();}count=other.count;bytes=other.bytes;nextRegionId=other.nextRegionId;processingOrder=other.processingOrder;
+    for(int i=0;i<8;++i){vcaGroups[i].name=other.vcaGroups[i].name;vcaGroups[i].gain=other.vcaGroups[i].gain.load();vcaGroups[i].mute=other.vcaGroups[i].mute.load();channelGroups[i].name=other.channelGroups[i].name;channelGroups[i].gain=other.channelGroups[i].gain.load();channelGroups[i].mute=other.channelGroups[i].mute.load();channelGroups[i].solo=other.channelGroups[i].solo.load();}exportOptions=other.exportOptions;count=other.count;bytes=other.bytes;nextRegionId=other.nextRegionId;processingOrder=other.processingOrder;
     masterGain=other.masterGain.load();masterMute=other.masterMute.load();masterInserts=std::move(other.masterInserts);
     compensation=std::move(other.compensation);visibleLatency=compensation.totalLatency;pdcReady=other.pdcReady.load();configurationError=other.configurationError;
     recordingOptions=other.recordingOptions;bpm=other.bpm.load();beatsPerBar=other.beatsPerBar;beatUnit=other.beatUnit;
@@ -216,6 +217,7 @@ bool AudioEngine::setSend(int source,int slot,int destination,bool pre,juce::Str
 void AudioEngine::render(float* const* output,int channels,int frames) noexcept {
     renderAtTime(output,channels,frames,-1);
 }
+void AudioEngine::processMasterMeter(float* const* output,int channels,int frames)noexcept{if(!masteringEnabled)return;const float* pointers[]{output[0],channels>1?output[1]:nullptr};mastering->process(pointers,std::min(channels,2),frames);}
 void AudioEngine::renderAtTime(float* const* output,int channels,int frames,double monotonicSeconds) noexcept {renderInternal(output,channels,frames,monotonicSeconds,nullptr,0);}
 void AudioEngine::renderWithInput(const float* const* input,int inputs,float* const* output,int channels,int frames)noexcept{renderInternal(output,channels,frames,-1,input,inputs);}
 void AudioEngine::renderInternal(float* const* output,int channels,int frames,double monotonicSeconds,const float* const* input,int inputs) noexcept {
@@ -234,7 +236,7 @@ void AudioEngine::renderInternal(float* const* output,int channels,int frames,do
     if(recorder&&audioRecording&&playing)recorder->capture(input,inputs,frames,renderPosition);
     for(int i=0;i<count;++i){auto& t=track(i);float peak=0;if(input&&!t.midiTrack&&!t.auxiliary&&t.recordInputLeft>=0&&t.recordInputLeft<inputs&&input[t.recordInputLeft])for(int sample=0;sample<frames;++sample)peak=std::max(peak,std::abs(input[t.recordInputLeft][sample]));if(input&&t.recordStereo&&t.recordInputRight>=0&&t.recordInputRight<inputs&&input[t.recordInputRight])for(int sample=0;sample<frames;++sample)peak=std::max(peak,std::abs(input[t.recordInputRight][sample]));t.inputPeak=peak;}
     consumeMidiInput(frames);bool liveScene=false;for(int i=0;i<count;++i)liveScene|=track(i).midiTrack||(monitoringAllowed&&track(i).monitorInput.load());
-    if(!playing&&!liveScene){masterPeak=masterRms=0;for(int i=0;i<count;++i)track(i).peak=track(i).rms=0;renderPreview(output,channels,frames);return;}
+    if(!playing&&!liveScene){masterPeak=masterRms=0;for(int i=0;i<count;++i)track(i).peak=track(i).rms=0;renderPreview(output,channels,frames);processMasterMeter(output,channels,frames);return;}
     float masterEnergy=0,masterMaximum=0;std::array<float,maxTracks> channelEnergy{},channelMaximum{};
     for(int offset=0;offset<frames;offset+=mixBlockSize){const int size=std::min(mixBlockSize,frames-offset);renderBlock(output,channels,offset,size);
         masterEnergy+=blockMasterRms*blockMasterRms*size;masterMaximum=std::max(masterMaximum,blockMasterPeak);
@@ -242,7 +244,7 @@ void AudioEngine::renderInternal(float* const* output,int channels,int frames,do
         if(!playing&&!liveScene)break;}
     // Publish meters after the full callback; UI readers never see an intermediate clear.
     masterPeak=masterMaximum;masterRms=std::sqrt(masterEnergy/frames);for(int i=0;i<count;++i){track(i).peak=channelMaximum[i];track(i).rms=std::sqrt(channelEnergy[i]/frames);}
-    renderPreview(output,channels,frames);
+    renderPreview(output,channels,frames);processMasterMeter(output,channels,frames);
     if(midiRecording)midiRecordEndTick=secondsToTicks(renderPosition,bpm.load());
     visiblePosition=midiRecording||audioRecording||(liveScene&&!playing)?renderPosition:std::min(renderPosition,duration());
 }
@@ -268,7 +270,7 @@ void AudioEngine::renderBlock(float* const* output,int channels,int offset,int f
     required=sourceSolo;for(int i=0;i<count;++i)required[i]=required[i]||track(i).soloSafe.load();
     for(int n=0;n<count;++n){const int i=processingOrder[n];const auto& t=track(i);if(required[i]){
         for(int destination:compensation.targets[i])if(destination>=0)required[destination]=true;}}
-    for(int i=0;i<count;++i){channelBuffers[i].clear();const auto& t=track(i);audible[i]=!t.mute && !(t.vcaGroup>=0&&vcaGroups[t.vcaGroup].mute.load())&&!(t.channelGroup>=0&&channelGroups[t.channelGroup].mute.load())&&(!anySolo || required[i]);}
+    for(int i=0;i<count;++i){channelBuffers[i].clear();const auto& t=track(i);audible[i]=(stemSource.load()<0||t.auxiliary||stemSource.load()==i)&&!t.mute && !(t.vcaGroup>=0&&vcaGroups[t.vcaGroup].mute.load())&&!(t.channelGroup>=0&&channelGroups[t.channelGroup].mute.load())&&(!anySolo || required[i]);}
     masterBuffer.clear();
     std::array<float,maxTracks> peaks{},squares{};
     for(int n=0;n<count;++n){const int i=processingOrder[n];auto& t=track(i);auto& buffer=channelBuffers[i];
@@ -445,7 +447,7 @@ juce::var AudioEngine::deviceCallbackTiming()const {
 void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device) { monitoringAllowed=false;requestedDeviceRate.store(device->getCurrentSampleRate()); }
 void AudioEngine::audioDeviceStopped() { monitoringAllowed=false;pause(); }
 AudioRuntime::AudioRuntime() { audioRecorder=std::make_unique<AudioRecorder>(engine);engine.attachRecorder(audioRecorder.get());midiRecorder=std::make_unique<MidiRecorder>(engine);initialError = devices.initialiseWithDefaultDevices(0, 2);if(auto* device=devices.getCurrentAudioDevice())engine.setOutputRate(device->getCurrentSampleRate()); devices.addAudioCallback(&engine); }
-void AudioRuntime::serviceMaintenance(){if(!engine.monitoringAllowed)for(int i=0;i<engine.trackCount();++i)engine.track(i).monitorInput=false;audioRecorder->service();midiRecorder->service();engine.automation->service();if(engine.needsMaintenance())editStructure([this]{if(auto* device=devices.getCurrentAudioDevice())engine.setOutputRate(device->getCurrentSampleRate());else engine.prepareProcessors();});}
+void AudioRuntime::serviceMaintenance(){if(!engine.monitoringAllowed)for(int i=0;i<engine.trackCount();++i)engine.track(i).monitorInput=false;audioRecorder->service();midiRecorder->service();engine.automation->service();engine.mastering->service();if(engine.needsMaintenance())editStructure([this]{if(auto* device=devices.getCurrentAudioDevice())engine.setOutputRate(device->getCurrentSampleRate());else engine.prepareProcessors();});}
 AudioRuntime::~AudioRuntime() { midiPorts.clear();devices.removeAudioCallback(&engine);juce::String error;audioRecorder->stop(error);midiRecorder->stop(error);devices.closeAudioDevice(); }
 bool AudioRuntime::ensureMidiInput(const juce::String& identifier,juce::String& error){
     if(identifier.isEmpty())return true;for(const auto& port:midiPorts)if(port->identifier==identifier)return true;

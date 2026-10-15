@@ -348,4 +348,17 @@ manutenção, wall time, ciclos e bytes C++ vivos da memória privada do process
 A limpeza da sessão liberou 17682432 bytes privados; o crescimento de objetos
 medidos acompanha o histórico das medições. Isso não certifica DLLs/alocadores
 não instrumentados. Cache de coeficientes EQ e avanço PDC sem divisão passam
-nos testes Debug/Release; comparação prolongada após correções em andamento.
+nos testes Debug/Release. Comparação após correções concluída: 300,063 s,
+35375 callbacks, dois atrasos, máximo9,458ms, P50/P95/P99 908/4162/5554us;
+CPU18,44% de um núcleo, zero new observado/controle/contenção VST.
+Private94027776→111779840, após clear95019008 bytes; C++ vivos nas amostras
+0/300:8423743/8468489. A redução observada é modesta e não demonstra eliminação
+de preempção ou leak de todos os alocadores. Os limites de prazo não mudaram.
+
+Callback real Realtek48k/480 instrumentado opcionalmente, desligado por padrão:
+UI final0.7 Debug Edit/Mix/MIDI/Master registrou481/188/136 callbacks,
+max4,5811/1,7502/3,8105ms; Release376/142/84, max0,2677/0,1469/0,2480ms,
+zero overrun nas seis cenas curtas. Essas cenas não equivalem à carga sintética
+de32 faixas. Testes completos finais15/15 em ambas configurações,593checks+2smoke.
+O medidor novo não aloca no render nos probes; histórico/FFT ficam no controle.
+Dados e ensaio integrado distinto da Fase7 em [phase7-report.md](phase7-report.md).

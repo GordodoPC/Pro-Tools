@@ -1,4 +1,5 @@
 #include "MixComponents.h"
+#include "MasteringComponents.h"
 #include "Session/AutomationModel.h"
 #include <cmath>
 namespace nova {
@@ -116,7 +117,7 @@ private:
 };
 class AutomationPanel final : public juce::Component {
 public:
-    AutomationPanel(AudioEngine& e,int i,MixEdit a):engine(e),index(i),apply(std::move(a)),curve(e,i,apply){
+    AutomationPanel(AudioEngine& e,int i,MixEdit a,std::function<void()> c):engine(e),index(i),apply(std::move(a)),curve(e,i,apply),changed(std::move(c)){
         for(auto* c:std::initializer_list<juce::Component*>{&target,&parameter,&points,&instructions,&commit,&mode,&result})addAndMakeVisible(c);
         target.addItem("Volume (ganho linear 0..2)",1);target.addItem("Pan (-1..1)",2);
         for(int slot=0;slot<4;++slot)if(auto& p=e.track(i).inserts[slot])target.addItem("Insert "+juce::String(slot+1)+": "+p->name(),slot+3);
@@ -131,7 +132,7 @@ public:
         undo.onClick=[this]{apply([&]{return engine.automation->undo();});loadPoints();};redo.onClick=[this]{apply([&]{return engine.automation->redo();});loadPoints();};
         live.setTextBoxStyle(juce::Slider::TextBoxRight,false,90,24);live.setRange(0,2);
         live.onDragStart=[this]{juce::String error;engine.automation->begin(index,curve.target,curve.parameter,error);};live.onDragEnd=[this]{engine.automation->end(index,curve.target,curve.parameter);};
-        live.onValueChange=[this]{const float v=float(live.getValue());auto& t=engine.track(index);if(curve.target==-1)t.gain=v;else if(curve.target==-2)t.pan=v;else if(t.inserts[curve.target])t.inserts[curve.target]->setParameter(curve.parameter,v);};
+        live.onValueChange=[this]{const float v=float(live.getValue());auto& t=engine.track(index);if(curve.target==-1)t.gain=v;else if(curve.target==-2)t.pan=v;else if(t.inserts[curve.target])t.inserts[curve.target]->setParameter(curve.parameter,v);changed();};
         points.setMultiLine(true);points.setReturnKeyStartsNewLine(true);instructions.setText("Curva: clique/arraste pontos; Shift-clique exclui. Undo/Redo apos Stop.\nWrite grava lanes; Touch retorna ao soltar; Latch mantem ate Stop. Slider grava o destino escolhido. Texto: segundos : valor.",juce::dontSendNotification);
         commit.onClick=[this]{AutomationLane lane;const int selected=target.getSelectedId();lane.target=selected==1?-1:selected==2?-2:selected-3;lane.parameter=parameter.getSelectedId()-1;
             if(lane.parameter<0){result.setText("Escolha um parametro disponivel.",juce::dontSendNotification);return;}
@@ -148,15 +149,15 @@ public:
             const bool applied=apply([this,lane=std::move(lane),selectedMode]()mutable{auto lanes=engine.track(index).automation;auto found=std::find_if(lanes.begin(),lanes.end(),[&](const auto& item){return item.target==lane.target && item.parameter==lane.parameter;});
                 if(found==lanes.end()&&lanes.size()>=64&&!lane.points.empty()){result.setText("Limite de 64 lanes por canal.",juce::dontSendNotification);return false;}
                 if(found!=lanes.end())lanes.erase(found);for(auto& p:lane.points)p.curve=shape.getSelectedId()-1;if(!lane.points.empty())lanes.push_back(std::move(lane));juce::String error;return engine.automation->replace(index,std::move(lanes),selectedMode,error);});
-            if(applied)result.setText("Automacao aplicada.",juce::dontSendNotification);
+            if(applied){loadPoints();result.setText("Automacao aplicada.",juce::dontSendNotification);}
         };loadPoints();setSize(720,650);
     }
     void resized()override{target.setBounds(15,15,getWidth()-30,28);parameter.setBounds(15,50,getWidth()-150,28);mode.setBounds(getWidth()-125,50,110,28);
         instructions.setBounds(15,85,getWidth()-30,65);shape.setBounds(15,150,140,25);live.setBounds(165,150,getWidth()-180,25);curve.setBounds(15,185,getWidth()-30,180);points.setBounds(15,375,getWidth()-30,getHeight()-465);undo.setBounds(15,getHeight()-85,120,25);redo.setBounds(145,getHeight()-85,120,25);commit.setBounds(15,getHeight()-55,150,30);result.setBounds(175,getHeight()-55,getWidth()-190,30);}
     bool validateBindings(){target.setSelectedId(1,juce::sendNotificationSync);parameter.setSelectedId(1,juce::dontSendNotification);mode.setSelectedId(2,juce::dontSendNotification);points.setText("0 : 0.5\n1 : 1");commit.onClick();
-        const bool edited=curve.validateEdit();const auto& t=engine.track(index);return edited&&t.automationMode==AutomationMode::read&&std::any_of(t.automation.begin(),t.automation.end(),[](const auto& lane){return lane.target==-1&&lane.points.size()==2&&lane.points[0].value==0.5f;});}
-private:AudioEngine& engine;int index;MixEdit apply;AutomationCurve curve;juce::ComboBox target,parameter,mode,shape;juce::Slider live;juce::TextEditor points;juce::Label instructions,result;juce::TextButton commit{"Aplicar lane"},undo{"Undo automacao"},redo{"Redo automacao"};
-    void loadPoints(){const int selected=target.getSelectedId();const int dest=selected==1?-1:selected==2?-2:selected-3;const int param=parameter.getSelectedId()-1;juce::String text;
+        const bool edited=curve.validateEdit();const auto& t=engine.track(index);const float oldGain=t.gain;live.setValue(0.75,juce::sendNotificationSync);const bool liveBound=t.gain==0.75f;live.setValue(oldGain,juce::sendNotificationSync);return edited&&liveBound&&t.automationMode==AutomationMode::read&&std::any_of(t.automation.begin(),t.automation.end(),[](const auto& lane){return lane.target==-1&&lane.points.size()==2&&lane.points[0].value==0.5f;});}
+private:AudioEngine& engine;int index;MixEdit apply;AutomationCurve curve;std::function<void()> changed;juce::ComboBox target,parameter,mode,shape;juce::Slider live;juce::TextEditor points;juce::Label instructions,result;juce::TextButton commit{"Aplicar lane"},undo{"Undo automacao"},redo{"Redo automacao"};
+    void loadPoints(){mode.setSelectedId(int(engine.track(index).automationMode)+1,juce::dontSendNotification);const int selected=target.getSelectedId();const int dest=selected==1?-1:selected==2?-2:selected-3;const int param=parameter.getSelectedId()-1;juce::String text;
         curve.target=dest;curve.parameter=std::max(0,param);float low=dest==-2?-1.0f:0,high=dest==-2?1.0f:2;if(dest>=0&&engine.track(index).inserts[dest]){auto spec=engine.track(index).inserts[dest]->spec(curve.parameter);low=spec.minimum;high=spec.maximum;}live.setRange(low,high);live.setValue(dest==-1?engine.track(index).gain.load():dest==-2?engine.track(index).pan.load():engine.track(index).inserts[dest]?engine.track(index).inserts[dest]->parameter(curve.parameter):0,juce::dontSendNotification);
         for(const auto& lane:engine.track(index).automation)if(lane.target==dest&&lane.parameter==param)for(const auto& p:lane.points)text+=juce::String(p.time,6)+" : "+juce::String(p.value,6)+"\n";points.setText(text);curve.repaint();}
 };
@@ -165,7 +166,7 @@ void meter(juce::Graphics& g,juce::Rectangle<float> r,float value){g.setColour(j
 }
 std::unique_ptr<juce::DocumentWindow> createPluginManager(PluginCatalog& catalog){return std::make_unique<ToolWindow>(new PluginManagerPanel(catalog),"Plugins VST3");}
 ChannelStrip::ChannelStrip(AudioEngine& e,EditModel& ed,int i,PluginCatalog& cat,MixEdit a,std::function<void()> c):engine(e),edit(ed),index(i),catalog(cat),apply(std::move(a)),changed(std::move(c)){
-    addAndMakeVisible(groups);groups.onClick=[this]{if(index>=0){closeEditors();toolWindow=std::make_unique<ToolWindow>(new GroupPanel(engine,index,apply,changed),"VCA, grupos e sidechain");}};if(index<0)groups.setVisible(false);
+    addAndMakeVisible(groups);groups.onClick=[this]{closeEditors();if(index>=0)toolWindow=std::make_unique<ToolWindow>(new GroupPanel(engine,index,apply,changed),"VCA, grupos e sidechain");else toolWindow=createMasteringEditor(engine,changed);};if(index<0)groups.setButtonText("LUFS / Export");
     for(auto* child:std::initializer_list<juce::Component*>{&name,&input,&peakLabel,&gain,&pan,&inputGain,&mute,&solo,&clip,&colour,&automation,&output})addAndMakeVisible(child);
     for(int slot=0;slot<4;++slot){addAndMakeVisible(inserts[slot]);inserts[slot].onClick=[this,slot]{insertMenu(slot);};}
     for(int slot=0;slot<2;++slot){addAndMakeVisible(sends[slot]);sends[slot].onClick=[this,slot]{sendEditor(slot);};}
@@ -222,7 +223,7 @@ void ChannelStrip::insertMenu(int slot){
     });
 }
 void ChannelStrip::sendEditor(int slot){if(index<0)return;closeEditors();toolWindow=std::make_unique<ToolWindow>(new SendPanel(engine,index,slot,apply,changed),"Send "+juce::String(slot+1));}
-void ChannelStrip::automationEditor(){if(index<0)return;closeEditors();toolWindow=std::make_unique<ToolWindow>(new AutomationPanel(engine,index,apply),"Automacao: "+engine.track(index).name);}
+void ChannelStrip::automationEditor(){if(index<0)return;closeEditors();toolWindow=std::make_unique<ToolWindow>(new AutomationPanel(engine,index,apply,changed),"Automacao: "+engine.track(index).name);}
 void ChannelStrip::refresh(){
     auto* t=index>=0?&engine.track(index):nullptr;
     if(!name.isBeingEdited())name.setText(t?t->name:"MASTER",juce::dontSendNotification);name.setColour(juce::Label::textColourId,t?juce::Colour(t->colour):accent);
@@ -239,7 +240,7 @@ void ChannelStrip::refresh(){
 }
 void ChannelStrip::resized(){const int w=getWidth();name.setBounds(8,6,w-50,24);colour.setBounds(w-42,7,34,22);input.setBounds(8,33,w-16,19);output.setBounds(8,55,w-16,24);inputGain.setBounds(8,82,w-16,27);
     for(int i=0;i<4;++i)inserts[i].setBounds(8,114+i*25,w-16,23);for(int i=0;i<2;++i)sends[i].setBounds(8,219+i*25,w-16,23);
-    automation.setBounds(8,271,(w-24)/2,23);groups.setBounds(w/2+4,271,(w-24)/2,23);pan.setBounds(8,299,w-16,70);mute.setBounds(8,373,38,24);solo.setBounds(50,373,38,24);clip.setBounds(w-66,373,58,24);
+    automation.setBounds(8,271,(w-24)/2,23);groups.setBounds(index<0?8:w/2+4,271,index<0?w-16:(w-24)/2,23);pan.setBounds(8,299,w-16,70);mute.setBounds(8,373,38,24);solo.setBounds(50,373,38,24);clip.setBounds(w-66,373,58,24);
     peakLabel.setBounds(8,401,w-16,22);gain.setBounds(12,428,w-62,std::max(110,getHeight()-437));}
 void ChannelStrip::paint(juce::Graphics& g){g.fillAll(panel);g.setColour(index<0?accent:juce::Colour(engine.track(index).colour));g.fillRect(0,0,getWidth(),3);g.setColour(juce::Colour(0xff334053));g.drawRect(getLocalBounds());
     const float peak=index<0?engine.masterPeak.load():engine.track(index).peak.load(),rms=index<0?engine.masterRms.load():engine.track(index).rms.load();
@@ -251,7 +252,7 @@ bool ChannelStrip::validatePhase3Bindings(int auxiliary){
     apply([this]{chain()[0]=std::make_unique<MixProcessor>(EffectKind::equalizer);return true;});
     auto* effect=new EffectPanel(*chain()[0],changed,engine.sampleRate());toolWindow=std::make_unique<ToolWindow>(effect,"EQ validation");const bool effectOk=effect->validateBindings();closeEditors();
     auto* send=new SendPanel(engine,index,0,apply,changed);toolWindow=std::make_unique<ToolWindow>(send,"Send validation");const bool sendOk=send->validateBindings(auxiliary);closeEditors();
-    auto* automationPanel=new AutomationPanel(engine,index,apply);toolWindow=std::make_unique<ToolWindow>(automationPanel,"Automation validation");const bool automationOk=automationPanel->validateBindings();closeEditors();
+    bool liveChangeNotified=false;auto* automationPanel=new AutomationPanel(engine,index,apply,[this,&liveChangeNotified]{liveChangeNotified=true;changed();});toolWindow=std::make_unique<ToolWindow>(automationPanel,"Automation validation");const bool automationOk=automationPanel->validateBindings()&&liveChangeNotified;closeEditors();
     // Native editor, send and automation share the actual components used by their buttons.
     return effectOk&&sendOk&&automationOk&&validateProfessionalBindings();
 }

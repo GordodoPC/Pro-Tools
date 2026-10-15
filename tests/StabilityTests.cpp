@@ -5,6 +5,7 @@
 #include "Audio/AudioEngine.h"
 #include "Audio/PluginCatalog.h"
 #include "Session/Session.h"
+#include "Session/AutomationModel.h"
 #include <chrono>
 #include <thread>
 #include <iostream>
@@ -78,8 +79,8 @@ void lifecycleTests(const juce::PluginDescription& desc,const std::shared_ptr<no
 
 class ContinuousTest final : private juce::Timer {
 public:
-    ContinuousTest(juce::PluginDescription description,std::shared_ptr<nova::Clip> asset,juce::File folder,int seconds)
-        :desc(std::move(description)),clip(std::move(asset)),dir(std::move(folder)),duration(seconds){
+    ContinuousTest(juce::PluginDescription description,std::shared_ptr<nova::Clip> asset,juce::File folder,int seconds,bool professional=false)
+        :desc(std::move(description)),clip(std::move(asset)),dir(std::move(folder)),duration(seconds),phase7(professional){
         timings.resize(size_t(seconds)*160+1000);engine.setOutputRate(48000);for(int i=0;i<32;++i)addSource(engine,clip);juce::String error;
         for(int i=0;i<3;++i)engine.addAux("Bus "+juce::String(i),i==1,error);
         for(int i=0;i<32;++i){engine.setRoute(i,i<16?32:33,error);auto& t=engine.track(i);t.automationMode=nova::AutomationMode::read;
@@ -92,17 +93,20 @@ public:
         engine.track(34).inserts[0]=std::make_unique<nova::MixProcessor>(nova::EffectKind::delay);engine.track(34).inserts[1]=std::make_unique<nova::MixProcessor>(nova::EffectKind::reverb);
         engine.setRoute(32,33,error);engine.setSend(0,0,34,true,error);engine.track(0).sends[0].gain=0.5f;engine.setSend(4,1,34,false,error);engine.track(4).sends[1].gain=0.25f;
         engine.prepareProcessors();engine.setLoop(0,1,true);engine.play();expect(engine.pdcValid(),"continuous scene PDC prepared");
+        if(phase7){nova::AudioEngine::MutationGuard guard(engine);for(int i=0;i<32;++i){engine.track(i).vcaGroup=i%4;engine.track(i).channelGroup=i%8;}engine.vcaGroups[0].gain=0.8f;engine.track(34).soloSafe=true;engine.track(0).sends[0].pan=0.3f;engine.track(0).sends[0].width=1.2f;expect(engine.setSidechain(1,0,error)&&engine.setSidechain(2,4,error),"phase7 sidechain graph prepared");engine.masteringEnabled=true;engine.prepareProcessors();}
     }
     ~ContinuousTest()override{stop=true;if(worker.joinable())worker.join();}
     void run(){start=Clock::now();initialCpu=cpuSeconds();baselineMemory=privateBytes();worker=std::thread([this]{renderLoop();});startTimer(100);juce::MessageManager::getInstance()->runDispatchLoop();stop=true;worker.join();
         const double wall=std::chrono::duration<double>(Clock::now()-start).count();auto result=std::make_unique<juce::DynamicObject>();
         passed=finite&&sawAudio&&callbacks>100&&renderAllocations==0&&controlErrors==0&&latencyRecalculations>0;
+        if(phase7)passed=passed&&std::isfinite(engine.mastering->integrated())&&engine.mastering->dropped()==0&&engine.automation->overflows()==0;
         result->setProperty("passed",passed);result->setProperty("durationSeconds",wall);result->setProperty("tracks",32);result->setProperty("auxBuses",3);result->setProperty("realVst3Instances",10);
         result->setProperty("callbacks",static_cast<int64_t>(callbacks.load()));result->setProperty("processedSamples",static_cast<int64_t>(samples.load()));result->setProperty("bufferSizes","64,128,257,480,1024");
         result->setProperty("maxRenderMs",maxMicroseconds.load()/1000.0);result->setProperty("deadlineOverruns",static_cast<int64_t>(overruns.load()));result->setProperty("callbackAllocationsObserved",static_cast<int64_t>(renderAllocations.load()));
         result->setProperty("cpuPercentOneCore",100*(cpuSeconds()-initialCpu)/wall);result->setProperty("baselinePrivateBytes",static_cast<int64_t>(baselineMemory));result->setProperty("finalPrivateBytes",static_cast<int64_t>(privateBytes()));
         result->setProperty("sampledPeakPrivateBytes",static_cast<int64_t>(peakMemory));result->setProperty("vstContentionSilences",static_cast<int64_t>(engine.contentionDropouts()));result->setProperty("controlErrors",controlErrors);result->setProperty("samplesFinite",finite.load());
         result->setProperty("dynamicLatencyRecalculations",latencyRecalculations);
+        result->setProperty("phase7FeaturesEnabled",phase7);if(phase7){result->setProperty("masterIntegratedLufs",engine.mastering->integrated());result->setProperty("masterTruePeakDb",engine.mastering->truePeak());result->setProperty("meterDroppedPackets",int64_t(engine.mastering->dropped()));result->setProperty("automationOverflows",int64_t(engine.automation->overflows()));}
         juce::Array<juce::var> missed;std::vector<double> durations;
         for(size_t i=0;i<timingCount;++i){const auto& t=timings[i];durations.push_back(t.wallUs);if(t.wallUs>t.budgetUs){auto o=std::make_unique<juce::DynamicObject>();o->setProperty("second",t.second);o->setProperty("frames",t.frames);o->setProperty("rate",t.rate);o->setProperty("wallUs",t.wallUs);o->setProperty("budgetUs",t.budgetUs);o->setProperty("wakeLateUs",t.wakeLateUs);o->setProperty("threadCycles",int64_t(t.cycles));o->setProperty("controlActionStart",t.controlStart);o->setProperty("controlActionEnd",t.controlEnd);missed.add(juce::var(o.release()));}}
         std::sort(durations.begin(),durations.end());for(auto percentile:{50,95,99})if(!durations.empty())result->setProperty("renderP"+juce::String(percentile)+"Us",durations[std::min(durations.size()-1,durations.size()*size_t(percentile)/100)]);
@@ -121,7 +125,7 @@ public:
     }
 private:
     juce::PluginDescription desc;std::shared_ptr<nova::Clip> clip;juce::File dir;int duration;
-    nova::AudioEngine engine;std::thread worker;Clock::time_point start;
+    nova::AudioEngine engine;std::thread worker;Clock::time_point start;bool phase7=false;
     std::atomic<bool> stop{false},finite{true},sawAudio{false};std::atomic<uint64_t> callbacks{0},samples{0},overruns{0},maxMicroseconds{0};
     uint64_t baselineMemory=0,peakMemory=0;double initialCpu=0;int lastSecond=-1,controlErrors=0,latencyRecalculations=0;bool passed=false;juce::Array<juce::var> metrics;
     struct Timing {double second,wallUs,budgetUs,wakeLateUs,rate;uint64_t cycles;int frames,controlStart,controlEnd;};
@@ -139,17 +143,20 @@ private:
         ULONG64 finalCycles=0;QueryThreadCycleTime(GetCurrentThread(),&finalCycles);threadCycles=finalCycles-initialCycles;renderThreadCpu=threadCpuSeconds()-initialThreadCpu;
     }
     void timerCallback()override{
+        if(phase7){engine.mastering->service();engine.automation->service();}
         const int second=static_cast<int>(std::chrono::duration<double>(Clock::now()-start).count());if(second==lastSecond)return;lastSecond=second;
         auto record=std::make_unique<juce::DynamicObject>();const auto memory=privateBytes();peakMemory=std::max(peakMemory,memory);record->setProperty("second",second);record->setProperty("privateBytes",static_cast<int64_t>(memory));record->setProperty("cpuSeconds",cpuSeconds()-initialCpu);record->setProperty("liveCppBytes",liveCppBytes.load());record->setProperty("liveCppObjects",liveCppObjects.load());record->setProperty("engineOwnedBytes",int64_t(engine.ownedBufferBytes()));metrics.add(juce::var(record.release()));
         if(second>=duration){stopTimer();juce::MessageManager::getInstance()->stopDispatchLoop();return;}
         juce::String error;
         try{
+            if(phase7&&second%6==1){engine.finishAutomation();const auto mode=static_cast<nova::AutomationMode>(2+(second/6)%3);if(!engine.automation->replace(8,engine.track(8).automation,mode,error)||!engine.automation->begin(8,-1,0,error))++controlErrors;engine.track(8).gain=second%2?0.6f:0.9f;}
+            if(phase7&&second%6==2)engine.automation->end(8,-1,0);
             if(second%3==1){engine.track(8).gain=0.7f;engine.track(8).pan=-0.4f;engine.track(0).inserts[1]->setParameter(12,second%2?3:-3);}
             if(second%6==3)engine.track(0).inserts[0]->setParameter(1,float(second%12==3?63:17)/2048);
             if(second%4==2){controlAction=1;nova::AudioEngine::MutationGuard guard(engine);engine.setSend(0,0,34,second%8<4,error);engine.track(4).inserts[0]->bypass=!engine.track(4).inserts[0]->bypass.load();engine.prepareProcessors();controlAction=0;}
             if(second>0&&second%5==0){controlAction=2;engine.setOutputRate(second%10==0?48000:44100);controlAction=0;}
             if(second>0&&second%7==0){controlAction=3;nova::AudioEngine::MutationGuard guard(engine);if(!nova::Session::save(dir.getChildFile("continuous.novadaw"),engine,error))++controlErrors;
-                if(!nova::Session::load(dir.getChildFile("continuous.novadaw"),engine,error))++controlErrors;engine.play();}
+                if(!nova::Session::load(dir.getChildFile("continuous.novadaw"),engine,error))++controlErrors;engine.masteringEnabled=phase7;engine.play();}
             controlAction=0;if(second>0&&second%11==0){controlAction=4;nova::AudioEngine::MutationGuard guard(engine);engine.track(0).inserts[0]->openEditor();engine.track(0).inserts[0]->closeEditor();controlAction=0;}
             if(engine.needsMaintenance()){engine.prepareProcessors();++latencyRecalculations;}if(!engine.pdcValid())++controlErrors;
         }catch(const std::exception&){++controlErrors;}controlAction=0;
@@ -164,7 +171,7 @@ int main(int argc,char** argv){juce::ScopedJuceInitialiser_GUI gui;try{
 #if defined(_DEBUG)
     const auto previousHook=_CrtSetAllocHook(crtHook);
 #endif
-    {ContinuousTest continuous(*descriptions[0],clip,dir,argc>=4?std::clamp(juce::String(argv[3]).getIntValue(),10,3600):10);continuous.run();}
+    {ContinuousTest continuous(*descriptions[0],clip,dir,argc>=4?std::clamp(juce::String(argv[3]).getIntValue(),10,3600):10,argc>=5&&juce::String(argv[4])=="phase7");continuous.run();}
 #if defined(_DEBUG)
     _CrtSetAllocHook(previousHook);
 #endif

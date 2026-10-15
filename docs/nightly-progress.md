@@ -158,3 +158,27 @@
   UI com curva/Undo e grupos passou em build/phase7-mix-final-ui-*.
 - Regressão de pilha Debug corrigida movendo estado adicional para heap de
   controle; nenhuma pilha/critério de teste aumentado. Limites em phase7-report.md.
+
+## 2026-10-15 — Fase 7, masterização e integração
+
+- Medidor K-weighted LUFS M/I com gating, FIR4x True Peak, crest/PLR e FFT2048;
+  captura limitada/prealocada, FFT/histórico/gating integrado fora do render.
+- Snapshot/worker exporta WAV PCM16/24/float32, rates8–192k, normalização com
+  teto estimado, TPDF e stems através de buses/Master. Fontes preservadas;
+  cancelamento/no-overwrite e persistência de opções em sessão v7.
+- Painel real Master LUFS / Export; checks numéricos/decodificação35 aprovados.
+  CTest Debug15/15 (47,55s) e Release15/15 (19,08s),593checks+2smoke por build.
+- Dez execuções UI passaram nas duas configurações; snapshots MIX/Master
+  inspecionados. Ensaio integrado300s com recursos7 habilitados em execução,
+  separado da carga comparativa anterior e sem compilação concorrente.
+- Revisão final encontrou slider de automação sem notificação dirty: corrigidos
+  callback de alteração e refresh de curva/modo após Aplicar/Undo; validação UI
+  agora exige o binding do slider e notificação. Rebuild/checagem após o ensaio.
+- Ensaio integrado inicial terminou:300,090s,35379callbacks,32overruns,
+  max55,757ms,CPU23,02%, zero new/controle/contenção VST/overflow medição/automação.
+  Carga diferente da comparação4→2: novos recursos habilitados explicitamente.
+  Private92631040→110497792, após clear91865088. Não aprovado quanto a prazos.
+- Medido custo do medidor: mediana143,568us por480frames; FIR SSE2/double com
+  ring espelhado manteve fases/taps e passou35checks, mediana43,0453us (~70%
+  menor wall time isolado). Sem relaxar critérios. UI corrigida Debug/Release
+  passou; rebuilds completos passaram e regressão/novo300s serão registrados.

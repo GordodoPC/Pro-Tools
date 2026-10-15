@@ -1,8 +1,8 @@
 # NOVA DAW — Fase 7: mixagem e masterização avançadas
 
 Início: 2026-10-15. Base preservada: `73f07da`, após `a8df20d`.
-Escopo autorizado em [roadmap.md](roadmap.md). Implementação em andamento;
-este registro será atualizado com resultados efetivamente executados.
+Escopo autorizado em [roadmap.md](roadmap.md). Versão 0.7.0; entrega funcional
+com limitações e validações externas pendentes discriminadas abaixo.
 
 ## Etapa 1 — investigação
 
@@ -134,7 +134,7 @@ Latch, Write, retorno ao Read, Undo/Redo, curvas, persistência e VST3 real pró
 Regressão completa: Debug **13/13 (40,61 s)**, Release **13/13 (22,95 s)**,
 539 verificações e dois smoke tests por build. UI Edit/Mix com editor/parâmetros,
 sends/automação/Master passou em `build/phase7-automation-ui-{debug,release}`.
-Grupos/sidechain e masterização são as próximas etapas.
+Grupos/sidechain e masterização foram integrados nas etapas seguintes.
 
 ### Etapa 3 — mixagem profissional
 
@@ -167,3 +167,145 @@ executar suas verificações. Estado adicional passou a ownership no heap,
 prealocado no controle, e os mesmos testes passaram sem aumentar sua pilha.
 Uma asserção inicial usou a sobrecarga errada de getMagnitude; corrigida para
 canal/start/count, mantendo a exigência numérica do gate no sample esperado.
+
+### Etapa 4 — medição e masterização
+
+MasteringMeter mede o sinal de saída efetivo após Master/preview. Implementação
+própria de K-weighting stereo, janelas de 400 ms/75% de sobreposição, gate
+absoluto -70 LUFS e relativo -10 LU para integrada; momentânea sem gate.
+Referência algorítmica: [ITU-R BS.1770-5](https://www.itu.int/dms_pubrec/itu-r/rec/bs/R-REC-BS.1770-5-202311-I!!PDF-E.pdf).
+Coeficientes de 48 kHz são mapeados por transformação bilinear para o rate ativo.
+True Peak é estimado por FIR sinc/Blackman 4x, 32 taps por fase; o exportador
+esvazia os 32 samples restantes do detector. Crest e PLR mostram dinâmica;
+FFT 2048/Hann alimenta espectro de 1024 bins na thread de controle.
+
+Render só filtra/acumula e publica em filas SPSC prealocadas. FFT, histórico e
+gating integrado ficam no controle/worker. Limites: 256 energias pendentes,
+quatro quadros de espectro e 864000 janelas de integrada (24 h). Overflow é
+contado, sem espera nem crescimento de fila; exportação recusa medição incompleta.
+Histórico cresce no controle até o limite e mantém sua capacidade após Reset.
+Medição é opt-in ao abrir o painel, desligada no engine por padrão. Callbacks
+inibidos por MutationGuard não entram no medidor. Não é ensaio de conformidade
+com toda a coleção de vetores ITU/EBU, nem certificado de precisão near-Nyquist.
+
+Exportação cria snapshot da sessão, prepara o sample rate no controle e renderiza
+em worker para arquivo float temporário. Passagens posteriores medem e aplicam
+ganho/TPDF/escrita, fora do callback. WAV PCM16, PCM24 e float32; opções aceitam
+8–192 kHz, painel oferece 44,1/48/88,2/96/192 kHz. Novo destino é publicado sem
+sobrescrever arquivo existente, somente após flush; cancelamento remove temporários.
+São usados JUCE já fixado no projeto e código próprio, sem biblioteca/dependência
+nova. A licença de distribuição permanece a já aplicável ao projeto/JUCE
+(AGPLv3 ou licença comercial correspondente).
+
+Normalização usa o menor ganho entre alvo LUFS e teto de True Peak estimado.
+Quando o teto impede o alvo, o resultado informa loudness alcançável; não se
+insere limiter. Silêncio/intervalo sem 400 ms úteis não ganha LUFS inventado.
+TPDF usa duas distribuições uniformes independentes por diferença, um LSB;
+float32 não recebe dither. O hard clip existente do motor permanece anterior
+à medição: exportar float não recupera sinal já clipado. O teto é estimado antes
+da quantização/dither; diferenças de poucos LSBs não equivalem a limiter certificado.
+
+Stems isolam cada fonte não auxiliar, mantêm seus sends/buses/Master e deixam
+detector de sidechain disponível. Cada arquivo tem nome único e opção de
+normalização independente. Processamento compartilhado não linear pode impedir
+que a soma dos stems reproduza exatamente o mix. Exporta-se o intervalo escolhido,
+sem extensão automática de caudas. Em erro/cancelamento, stems já concluídos são
+preservados; nenhum WAV original é modificado.
+
+35 checks de MasteringAndExport passaram em Debug e Release, incluindo áudio
+decodificado: referência stereo 997 Hz/0,1 a 44,1/48/96 kHz mediu
+-19,9993/-19,9999/-20,0023 LUFS (tolerância 0,12 LU), True Peak de seno 12 kHz
+com pico entre samples (tolerância 0,15 dB), gating, silêncio, crest, espectro,
+estatística TPDF, formatos/rates/frames, normalização -14 LUFS e teto, stems,
+persistência, cancelamento e fontes byte-for-byte. Probe não observou C++ new
+no render com medição habilitada. Não substitui inspeção de alocadores estrangeiros.
+
+### Etapa 5 — interface MIX
+
+Auto abre modos, curva gráfica/textual, parâmetro ao vivo e Undo/Redo;
+VCA / SC abre grupos/Solo Safe/key e os sends têm controles avançados.
+LUFS / Export no Master abre LUFS M/I, True Peak, crest/PLR, espectro, reset,
+formato/rate/intervalo, normalização/dither e jobs reais de mix/stems/cancelamento.
+UI acompanha progresso e mostra arquivo/loudness/ganho. O snapshot é preparado
+antes do worker e plugins não são destruídos enquanto em processamento.
+
+### Etapas 6/7 — regressão e documentação
+
+Builds Ninja x64 da versão 0.7.0 passaram em Debug e Release. CTest antes da
+otimização adicional da FIR:
+**15/15 Debug (47,55 s)** e **15/15 Release (19,08 s)**, **593 checks e dois
+smoke tests por configuração**. Todas as suítes anteriores continuam habilitadas.
+Logs em `build/{ninja-debug,ninja-release}/Testing/Temporary/LastTest.log`.
+Resultados de interface e ensaio integrado prolongado são registrados abaixo
+após sua execução; nenhuma aprovação é inferida a partir do build.
+
+Dez execuções UI passaram, uma por vez, em
+`build/phase7-final-ui-{editmix,midi,recording,advanced,mastering}-{debug,release}`.
+MIX/Master inspecionados visualmente; exportação do painel gerou PCM16/44100 Hz,
+88200 frames e configuração reaberta. Realtek48k/480: no Master Debug136 callbacks,
+média1591,42us/max3810,5us, Release84 média95,05us/max248us, zero overrun.
+LUFS ao vivo inclui silêncio de início e é diferente da medição offline isolada;
+nenhum teste de captura física ou terceiros foi inferido desses resultados.
+
+Correção da revisão final: slider ao vivo de automação agora notifica sessão
+modificada, e Aplicar/Undo atualizam curva/modo. A UI Edit/Mix foi reexecutada
+em Debug/Release com binding e notificação exigidos, ambos aprovados em
+`build/phase7-final-corrected-ui-editmix-{debug,release}`.
+
+### Ensaio integrado adicional — primeira execução
+
+`build/phase7-final-stability-300s/stability-result.json`: 300,090s, 35379 callbacks,
+13818404 samples, **32 violações**, máximo55,757ms, P50/P95/P99
+1068/5205/6933us, CPU23,02% de um núcleo, render thread61,359s.
+Zero C++ new observado/controle/contenção VST, zero overflow de medição/automação,
+integrada-24,075LUFS/TruePeak-21,333dBTP, 11 recalculos de latência.
+Gate804/manutenção3778; todas as violações com ação0 na entrada/saída.
+
+Essa carga opt-in acrescentou grupos/VCA, dois sidechains nativos, captura
+Write/Touch/Latch e medidor ao workload de32 faixas/3buses/10VST3; não substitui
+nem é a mesma carga da comparação4→2. `passed=true` valida finitude/estado/
+alocações/overflow; **não aprova cumprimento de prazo**. O máximo e o aumento
+dos atrasos exigem continuidade de estabilização, sem relaxar frames/sampleRate.
+
+Private inicial/final/pico:92631040/110497792/112222208 bytes; após clear91865088.
+C++ vivos amostra0/300:8472166/8522711, objetos83575/83928, buffers conhecidos
+1895264/1833368 bytes. Após clear:3575074 bytes/868 objetos e335160 bytes de
+buffers conhecidos. Histórico das medições/automação e capacidade de heap/cache
+explicam parte da retenção, sem evidência de crescimento de18MB em objetos
+medidos; DLLs e alocadores fora do probe continuam não certificados.
+
+O custo do medidor foi isolado em benchmark Release de1000 blocos de480 frames,
+três passagens, excluindo FFT/service do cronômetro:154,210/143,568/126,521us
+por bloco antes da otimização adicional. Foi preparada convolução SSE2 em
+double com histórico espelhado/prealocado, mantendo quatro fases/32 taps e
+coeficientes, para reduzir esse trabalho comprovado. Medição posterior e novo
+ensaio integrado serão registrados após validação.
+
+Benchmark depois:37,6148/43,0453/47,1140us por bloco; mediana143,568→43,0453us
+(aproximadamente70% menos wall time nesse microbenchmark). As mesmas35
+verificações numéricas/exportações passaram. SSE2 é garantido pelo alvo Windows
+x64 já usado; não se alteraram filtro, número de fases/taps, precisão double ou
+critérios/tolerâncias. Logs em `build/phase7-meter-{before,after}.log`; modo
+opcional `NovaMasteringTests.exe "pasta" benchmark`. Não atribui todos os32
+atrasos à FIR: a primeira carga também teve grandes atrasos de despertar.
+
+Após SSE2 e correção da UI, rebuilds completos aprovados. CTest final
+**15/15 Debug (46,40s)** e **15/15 Release (20,59s)**, mantendo593 checks+2smoke
+por configuração e todas as tolerâncias. Logs atuais em Testing/Temporary;
+logs anteriores preservados em `build/phase7-regression-before-simd`.
+
+Dez execuções UI da entrega após essas correções passaram em
+`build/phase7-delivery-ui-{editmix,midi,recording,advanced,mastering}-{debug,release}`.
+Realtek48k/480, zero overrun nas cenas curtas medidas:
+
+| Configuração/cena | Callbacks | Média us | Máximo us | P99 superior us |
+|---|---:|---:|---:|---:|
+| Debug Edit/Mix | 474 | 983,10 | 4227,6 | 3500 |
+| Debug MIDI | 183 | 543,83 | 1655,5 | 1500 |
+| Debug Master | 114 | 632,20 | 1691,0 | 1700 |
+| Release Edit/Mix | 373 | 58,02 | 322,6 | 300 |
+| Release MIDI | 138 | 42,21 | 156,8 | 200 |
+| Release Master | 84 | 43,72 | 136,7 | 200 |
+
+Gravação UI usa entradas simuladas e WAVs reais, MIDI usa instrumento próprio
+real com saída de dispositivo; nenhuma validação física de entrada é inferida.

@@ -55,7 +55,7 @@ bool Session::save(const juce::File& file, const AudioEngine& engine, juce::Stri
     root->setProperty("format", "nova-daw-session"); root->setProperty("version", 7);root->setProperty("midiPpq",midiPpq);root->setProperty("metronome",engine.metronomeEnabled.load());
     const auto& record=engine.recordingOptions;auto settings=std::make_unique<juce::DynamicObject>();settings->setProperty("punch",record.punch);settings->setProperty("loop",record.loop);settings->setProperty("punchIn",record.punchIn);settings->setProperty("punchOut",record.punchOut);settings->setProperty("preRoll",record.preRoll);settings->setProperty("postRoll",record.postRoll);settings->setProperty("loopStart",record.loopStart);settings->setProperty("loopEnd",record.loopEnd);root->setProperty("recording",juce::var(settings.release()));
     juce::Array<juce::var> groups;for(int kind=0;kind<2;++kind)for(int i=0;i<8;++i){const auto& g=kind?engine.channelGroups[i]:engine.vcaGroups[i];auto o=std::make_unique<juce::DynamicObject>();o->setProperty("name",g.name);o->setProperty("gain",g.gain.load());o->setProperty("mute",g.mute.load());o->setProperty("solo",g.solo.load());groups.add(juce::var(o.release()));}root->setProperty("mixGroups",groups);root->setProperty("masterGain", engine.masterGain.load());
-    root->setProperty("masterMute",engine.masterMute.load());root->setProperty("masterInserts",insertState(engine.masterInserts));
+    auto exportState=std::make_unique<juce::DynamicObject>();const auto& x=engine.exportOptions;exportState->setProperty("sampleRate",x.sampleRate);exportState->setProperty("bits",x.bits);exportState->setProperty("normalize",x.normalize);exportState->setProperty("dither",x.dither);exportState->setProperty("targetLufs",x.targetLufs);exportState->setProperty("ceilingDbTP",x.ceilingDbTP);root->setProperty("exportOptions",juce::var(exportState.release()));root->setProperty("masterMute",engine.masterMute.load());root->setProperty("masterInserts",insertState(engine.masterInserts));
     root->setProperty("bpm",engine.bpm.load()); root->setProperty("beatsPerBar",engine.beatsPerBar); root->setProperty("beatUnit",engine.beatUnit);
     root->setProperty("loopEnabled",engine.loopEnabled.load()); root->setProperty("loopStart",engine.loopStart.load()); root->setProperty("loopEnd",engine.loopEnd.load());
     juce::Array<juce::var> rows;
@@ -212,6 +212,6 @@ bool Session::load(const juce::File& file, AudioEngine& engine, juce::String& er
         }
         if(!candidate->rebuildGraph(error))return false;
     }
-    engine.replaceSession(*candidate);return true;
+    if(!data["exportOptions"].isVoid()){const auto& v=data["exportOptions"];if(!v.isObject()||!numeric(v["sampleRate"])||!v["bits"].isInt()||!v["normalize"].isBool()||!v["dither"].isBool()||!numeric(v["targetLufs"])||!numeric(v["ceilingDbTP"])){error="Exportacao invalida.";return false;}candidate->exportOptions={double(v["sampleRate"]),double(v["targetLufs"]),double(v["ceilingDbTP"]),int(v["bits"]),bool(v["normalize"]),bool(v["dither"])};if(!candidate->exportOptions.valid()){error="Formato/rate/loudness de exportacao invalido.";return false;}}engine.replaceSession(*candidate);return true;
 }
 }

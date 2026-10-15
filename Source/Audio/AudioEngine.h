@@ -7,6 +7,7 @@
 #include <thread>
 #include "MixProcessor.h"
 #include "AudioRecorder.h"
+#include "Mastering.h"
 #include "Midi/MidiData.h"
 #include "Midi/MidiQueue.h"
 
@@ -81,6 +82,10 @@ class AudioEngine final : public juce::AudioIODeviceCallback, private juce::Audi
 public:
     struct Group {juce::String name;std::atomic<float> gain{1};std::atomic<bool> mute{false},solo{false};};
     std::array<Group,8> vcaGroups,channelGroups;
+    ExportOptions exportOptions;
+    std::unique_ptr<MasteringMeter> mastering;
+    std::atomic<bool> masteringEnabled{false};
+    std::atomic<int> stemSource{-1}; // offline contribution isolation; key taps remain live
     bool setSidechain(int track,int source,juce::String&);
     AudioEngine();
     std::unique_ptr<AutomationModel> automation;
@@ -241,6 +246,7 @@ private:
     void scheduleTrackMidi(int track,int frames,int callbackOffset,bool active) noexcept;
     void consumeMidiInput(int frames) noexcept;
     void renderInternal(float* const*,int,int,double,const float* const*,int) noexcept;
+    void processMasterMeter(float* const*,int,int)noexcept;
     AudioRecorder* recorder=nullptr;
     const float* const* renderInputs=nullptr;
     int renderInputCount=0;

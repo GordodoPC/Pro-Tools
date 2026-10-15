@@ -4,6 +4,7 @@
 #include "MidiComponents.h"
 #include "RecordingComponents.h"
 #include "AudioEditComponents.h"
+#include "MasteringComponents.h"
 #include "Session/Preferences.h"
 #include "Session/Session.h"
 #include <functional>
@@ -24,6 +25,7 @@ public:
     void requestClose();
     void enableUiValidation(const juce::File& outputDirectory);
     void enableAdvancedUiValidation(const juce::File&);
+    void enableMasteringUiValidation(const juce::File&);
     void enableRecordingUiValidation(const juce::File& outputDirectory);
     void enableMidiUiValidation(const juce::File& outputDirectory);
 private:
@@ -54,6 +56,9 @@ private:
     std::unique_ptr<juce::DocumentWindow> midiWindow;
     std::unique_ptr<juce::DocumentWindow> recordingWindow;
     std::unique_ptr<juce::DocumentWindow> advancedWindow;
+    std::unique_ptr<juce::DocumentWindow> masteringWindow;
+    bool validationMastering=false,validationMasteringBindings=false;
+    void masteringUiValidation();
     void openAdvancedEditor();
     void advancedUiValidation();
     bool validationAdvanced=false,validationAdvancedBindings=false;

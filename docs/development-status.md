@@ -1,4 +1,28 @@
-# Retomada do desenvolvimento — 2026-10-15
+# Estado do desenvolvimento — 2026-10-15, versão 0.7.0
+
+Entrega atual: automação Write/Touch/Latch/Read e curvas/Undo, VCA/grupos,
+sidechain nativo com PDC, Solo Safe/sends avançados e masterização/exportação
+integradas ao MIX. Builds Debug/Release e CTest **15/15** nas duas configurações,
+**593 verificações + dois smoke tests** por build. Tempos: 46,40 s / 20,59 s.
+Dez validações de UI passaram: Edit/Mix, MIDI, gravação, edição e masterização
+em cada configuração, com WAV real exportado e configurações reabertas.
+Artefatos: `build/phase7-final-ui-{editmix,midi,recording,advanced,mastering}-{debug,release}`.
+Relatório atual e limites: [phase7-report.md](phase7-report.md).
+
+Estabilização investigada: comparação de 300 s com a mesma carga passou de
+4 para 2 violações, após cache EQ/PDC; os nove atrasos históricos não tinham
+instrumentação individual. Crescimento privado foi separado de objetos vivos e
+retenção de heap/cache; não há comprovação de leak geral nem de ausência dele.
+Persistem prazos ocasionais, investigação de escalonamento e ensaios de horas.
+
+Sessões atuais v7 leem v1–6. Master/plugin IO/dispositivo continuam stereo;
+matriz 5.1/7.1 está preparada. Sidechain externo opera nos DSPs nativos; buses
+auxiliares VST3 não estão habilitados. Automação captura gestos a 30 Hz pelo
+host; gestos de editores VST3 externos não são capturados diretamente.
+Medição foi validada numericamente, sem certificação ITU/EBU completa.
+Hardware de captura/MIDI físico, terceiros e audição prolongada seguem pendentes.
+
+O registro abaixo preserva a auditoria e resultados históricos da retomada.
 
 ## Base conferida antes das alterações
 
@@ -26,7 +50,7 @@ build/testes; não são benchmark isolado de desempenho.
 | 4 | MIDI/Piano Roll/VST3i/SMF/captura implementados | Entrada MIDI física, jitter/hotplug e instrumentos externos |
 | 5 | Captura multipista/punch/loop/takes/recuperação implementados | Entradas físicas multicanal, calibração de latência, desconexão e disco cheio real |
 | 6 | Fades/slip/ripple/comp/stretch/pitch/consolidate/bounce implementados | Audição de material complexo, sessões longas e falhas reais de IO/plugins |
-| 7 | Autorizada em nova solicitação de 2026-10-15; estabilidade em validação | Automação avançada, grupos/sidechain, masterização/exportação e UI conforme roadmap.md |
+| 7 | Recursos implementados e integrados; 15 testes e cinco modos UI por configuração aprovados | Prazos/ensaios de horas, validação completa de medição, gestos externos VST3 e sidechain auxiliar VST3; surround preparado na API |
 
 O aceite funcional das Fases 4–6 já tinha evidência automatizada, incluindo
 áudio de instrumentos reais próprios e WAVs reais de entradas simuladas. Isso

@@ -202,3 +202,11 @@ assíncronos e sessão aprovados, em
 em `build/resume-20261015-ui-editmix-{debug,release}/ui-result.json`.
 Correções no commit local `a8df20d`. Novo SHA256 Release:
 `0976427221EC4B7572578C00D96789C77B4F64EE91DBD5A36BF35827F76DC21F`.
+
+## Continuidade na Fase 7 — 0.7.0
+
+Os 60 checks de edição avançada continuam aprovados. UI transform/preview/consolidate/bounce passou em ambas as configurações; fontes continuam preservadas. Audição complexa, caudas automáticas e IO adverso real permanecem pendentes.
+Sessão v7 lê v1–6 e conserva os recursos desta fase. Regressão final CTest
+15/15 Debug (46,40s) e Release (20,59s), 593 checks+dois smoke por build.
+Artefatos UI: `build/phase7-final-ui-*-{debug,release}`. Novas funções e
+limites em [phase7-report.md](phase7-report.md).

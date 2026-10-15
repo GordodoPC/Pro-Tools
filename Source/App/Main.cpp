@@ -3,13 +3,14 @@ namespace nova {
 class Application final : public juce::JUCEApplication {
 public:
     const juce::String getApplicationName() override { return "NOVA DAW"; }
-    const juce::String getApplicationVersion() override { return "0.6.0"; }
+    const juce::String getApplicationVersion() override { return "0.7.0"; }
     bool moreThanOneInstanceAllowed() override { return false; }
     void initialise(const juce::String& args) override {
         auto component = std::make_unique<MainComponent>();
         auto tokens = juce::StringArray::fromTokens(args, true); tokens.removeEmptyStrings();
         for (int i = 0; i + 1 < tokens.size(); ++i) {
             if (tokens[i] == "--session") component->openSession(juce::File(tokens[++i].unquoted()));
+            else if(tokens[i]=="--validate-mastering-ui") component->enableMasteringUiValidation(juce::File(tokens[++i].unquoted()));
             else if(tokens[i]=="--validate-advanced-ui") component->enableAdvancedUiValidation(juce::File(tokens[++i].unquoted()));
             else if(tokens[i]=="--validate-recording-ui") component->enableRecordingUiValidation(juce::File(tokens[++i].unquoted()));
             else if(tokens[i]=="--validate-midi-ui") component->enableMidiUiValidation(juce::File(tokens[++i].unquoted()));

@@ -130,3 +130,11 @@ UI MIDI Debug/Release reexecutada com `passed=true`, Piano Roll/Undo/Redo,
 tempo final 90 BPM. Artefatos:
 `build/resume-20261015-ui-midi-{debug,release}/ui-result.json` e `piano-roll.png`.
 `physicalMidiInputTested=false`, `thirdPartyInstrumentTested=false`.
+
+## Continuidade na Fase 7 — 0.7.0
+
+MIDI/SMF/concorrência e instrumento VST3i próprio continuam aprovados. UI MIDI passou em ambas as configurações com áudio de saída Realtek; entrada MIDI física/terceiros continuam pendentes.
+Sessão v7 lê v1–6 e conserva os recursos desta fase. Regressão final CTest
+15/15 Debug (46,40s) e Release (20,59s), 593 checks+dois smoke por build.
+Artefatos UI: `build/phase7-final-ui-*-{debug,release}`. Novas funções e
+limites em [phase7-report.md](phase7-report.md).

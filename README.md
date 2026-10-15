@@ -1,4 +1,4 @@
-# NOVA DAW — Fase 6 (0.6.0)
+# NOVA DAW — Fase 7 (0.7.0)
 
 Aplicativo desktop próprio para Windows em C++20/JUCE. Esta versão implementa
 Edit/Mix, importação WAV mono/estéreo, waveform real, reprodução simultânea,
@@ -12,7 +12,10 @@ gravação MIDI, metrônomo e arquivos Standard MIDI File. A Fase 5 adiciona gra
 WAV multipista, entradas mono/estéreo, punch/roll, loop/takes e recuperação.
 A Fase 6 adiciona fades/crossfades, seleção múltipla, slip/ripple, stretch/pitch
 offline, preview, comping, consolidação e bounce.
-ASIO e Write/Touch/Latch continuam pendentes.
+A Fase 7 adiciona Write/Touch/Latch, curvas editáveis, VCA/grupos, Solo Safe,
+sidechain nativo compensado, sends pan/width, LUFS/True Peak/espectro e
+exportação offline WAV/stems com normalização e dither. ASIO continua pendente.
+Resultados e limites: [docs/phase7-report.md](docs/phase7-report.md).
 A Fase 3.5 adiciona PDC e proteção do ciclo de vida/processamento VST3.
 Edição avançada: [docs/phase6-report.md](docs/phase6-report.md).
 Gravação: [docs/phase5-report.md](docs/phase5-report.md).
@@ -108,13 +111,38 @@ slot/estado, deixam o sinal seco passar com o último atraso conhecido e mostram
 descrições da lista ou limpar falhas. Isso preserva os módulos instalados e
 os inserts já carregados na sessão.
 
-**Auto Off/Read** abre a edição de volume, pan ou parâmetros de inserts.
+**Auto** abre a edição de volume, pan ou parâmetros de inserts.
 Escolha destino/parâmetro e edite um ponto por linha (`segundos : valor`).
 **Aplicar lane** substitui os pontos; uma lista vazia remove a lane.
 Tempos devem ser crescentes. Volume usa ganho linear 0..2, pan -1..1,
 VST3 0..1 e DSP nativo as unidades do editor. A interpolação segue seek/loop.
 Volume/pan são calculados por amostra; parâmetros usam segmentos de até
-16 amostras. A edição de pontos é textual; envelopes gráficos estão pendentes.
+16 amostras. No gráfico, clique para criar, arraste para mover e Shift+clique
+para excluir pontos. Escolha Linear, Hold ou Smooth; a curva usa a forma do
+ponto à esquerda. Undo/Redo do painel mantém histórico próprio de automação.
+Read reproduz as lanes; Write grava lanes configuradas durante Play; Touch
+grava durante o gesto e retorna à curva ao soltar; Latch mantém o valor até
+parar. Faders/pan e o slider de destino do painel disparam gestos reais.
+A captura ocorre a 30 Hz na thread de controle; gestos em editores VST3 externos
+ainda precisam usar o slider de parâmetro da NOVA para serem gravados.
+
+**VCA / SC** abre grupos por faixa: associação a um dos oito VCAs e oito grupos
+de canais, ganho/mute, solo de grupo, Solo Safe e fonte de sidechain para NOVA
+Compressor/Gate. A dependência do detector entra no grafo e na PDC; ciclos são
+recusados. Sends possuem pan, largura stereo e mute. A API de matriz multicanal
+prepara mono/stereo/5.1/7.1; dispositivo, buses e inserts continuam stereo.
+
+No Master, **LUFS / Export** abre medição momentânea/integrada, True Peak,
+crest/PLR e espectro. Reset reinicia a medição. Escolha o intervalo em segundos,
+sample rate, PCM16/24 ou float32, alvo LUFS/teto dBTP e dither TPDF (PCM).
+**Exportar mix WAV** cria um novo arquivo; **Exportar stems** cria uma pasta
+com um arquivo por fonte através de seus sends/buses/Master. A exportação usa
+snapshot independente em worker; Cancelar preserva fontes e arquivos já
+concluídos. Normalização escolhe ganho limitado pelo teto estimado de True Peak;
+o alvo LUFS pode ficar abaixo do solicitado. Não há limiter automático. Buses
+e Master não lineares podem fazer a soma dos stems diferir do mix completo.
+O intervalo não acrescenta caudas além do fim escolhido. Preserve a pasta
+de sessão e os plugins disponíveis ao reproduzir um render.
 
 **CLIP** retém overload e permite limpar a indicação. Os medidores P/RMS usam
 escala de -60 a 0 dBFS. Faders, entrada, pan, mute/solo, sends e bypass têm
@@ -124,8 +152,10 @@ Em janelas pequenas, use a rolagem da mesa para acessar todos os controles.
 Larguras, zoom, vista Edit/Mix e Snap são restaurados por
 `.nova-preferences.json`, local à pasta deste projeto.
 
-Sessões versão 6 guardam também MIDI/instrumentos, gravação/entradas/takes, fades
-e fontes/resultados de transformações/comping. Versões 1–5 continuam legíveis.
+Sessões versão 7 guardam modos/curvas de automação, grupos, Solo Safe, sidechain,
+sends avançados e opções de exportação. Versões 1–6 continuam legíveis.
+A versão 6 adicionou MIDI/instrumentos, gravação/entradas/takes, fades
+e fontes/resultados de transformações/comping.
 A versão 3 guardava regiões, mixagem, nomes/cores/alturas, entrada, buses,
 roteamento, inserts, estado opaco VST3, sends, automação, tempo/loop e Master.
 Versões 1/2 continuam legíveis, com valores padrão para os novos recursos.
@@ -317,3 +347,19 @@ solo de grupo, Solo Safe e fonte de sidechain do NOVA Compressor/Gate.
 Key externo tem PDC inclusive com inserts de latência antes do detector.
 Sends oferecem pan, largura estéreo e mute. O playback permanece stereo;
 ChannelMatrix prepara a evolução para mais canais, sem habilitar surround no device.
+
+Reproduzir o ensaio integrado da Fase 7 (sem alterar a carga histórica padrão):
+
+```powershell
+$taskRoot = (Get-Location).Path
+$taskPlugin = Join-Path $taskRoot 'build/ninja-release/NovaTestGain_artefacts/Release/VST3/NOVA Test Gain.vst3/Contents/x86_64-win/NOVA Test Gain.vst3'
+& './build/ninja-release/NovaStabilityTests_artefacts/Release/NovaStabilityTests.exe' (Join-Path $taskRoot 'build/phase7-stability-manual') $taskPlugin 300 phase7
+& './build/ninja-release/NovaDAW_artefacts/Release/NOVA DAW.exe' --validate-mastering-ui "$PWD\build\phase7-mastering-manual"
+```
+
+O argumento opcional `phase7` acrescenta VCA/grupos, key nativo, captura de
+automação e medição à cena de 32 faixas. O JSON identifica essa carga distinta
+e exige medição finita/zero overflow, além dos critérios funcionais anteriores.
+Overruns continuam contados por `frames/sampleRate`, mesmo com `passed=true`
+funcional. Rode um aplicativo de validação por vez; use uma pasta nova por ensaio.
+Snapshots/JSON/WAVs de teste ficam em `build` e não são versionados.

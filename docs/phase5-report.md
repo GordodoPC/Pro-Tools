@@ -102,3 +102,11 @@ UI de gravação Debug/Release passou novamente: bindings, duas capturas distint
 e roundtrip aprovados, monitoring desligado após abrir. Artefatos:
 `build/resume-20261015-ui-recording-{debug,release}/ui-result.json` e
 `recording-panel.png`. `simulatedInputs=true`, `hardwareRecordingTested=false`.
+
+## Continuidade na Fase 7 — 0.7.0
+
+Os 43 checks de gravação/takes/recuperação continuam aprovados. UI de gravação passou em ambas as configurações, com entradas simuladas e monitoring desligado ao reabrir; captura física multicanal permanece pendente.
+Sessão v7 lê v1–6 e conserva os recursos desta fase. Regressão final CTest
+15/15 Debug (46,40s) e Release (20,59s), 593 checks+dois smoke por build.
+Artefatos UI: `build/phase7-final-ui-*-{debug,release}`. Novas funções e
+limites em [phase7-report.md](phase7-report.md).

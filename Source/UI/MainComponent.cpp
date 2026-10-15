@@ -116,7 +116,7 @@ void MainComponent::paint(juce::Graphics& g) {
     g.setColour(accent); g.setFont(juce::Font(juce::FontOptions(22).withStyle("Bold")));
     g.drawText("NOVA", 16, 35, 100, 28, juce::Justification::centredLeft);
     g.setColour(juce::Colour(0xff94a3b8)); g.setFont(11.0f);
-    g.drawText("AUDIO WORKSTATION  /  FASE 6", 17, 64, 225, 20, juce::Justification::centredLeft);
+    g.drawText("AUDIO WORKSTATION  /  FASE 7", 17, 64, 225, 20, juce::Justification::centredLeft);
     meter(g, juce::Rectangle<float>(getWidth() - 220.0f, 109, 195, 5), audio.engine.masterPeak.load(), true);
 }
 void MainComponent::resized() {
@@ -309,6 +309,13 @@ bool MainComponent::keyPressed(const juce::KeyPress& key) {
 }
 void MainComponent::openAdvancedEditor(){if(!editor.selected()){showError("Selecione um clip de audio na timeline.");return;}advancedWindow=createAdvancedAudioEditor(audio,editor,[this](auto operation){return applyEdit(std::move(operation));},currentSession==juce::File{}?juce::File(NOVA_PROJECT_ROOT):currentSession.getParentDirectory(),[this]{dirty=true;refreshEdited();});}
 void MainComponent::enableAdvancedUiValidation(const juce::File& folder){validationDirectory=folder;validationStep=0;validationAdvanced=true;}
+void MainComponent::enableMasteringUiValidation(const juce::File& folder){validationDirectory=folder;validationStep=0;validationMastering=true;audio.engine.measureDeviceCallbacks=true;}
+void MainComponent::masteringUiValidation(){
+    if(validationStep==0){validationDirectory.createDirectory();const auto source=validationDirectory.getChildFile("mastering-source-"+juce::Uuid().toString()+".wav");juce::AudioBuffer<float> signal(2,96000);for(int c=0;c<2;++c)for(int n=0;n<96000;++n)signal.setSample(c,n,0.1f*float(std::sin(2*juce::MathConstants<double>::pi*997*n/48000)));juce::WavAudioFormat format;auto stream=source.createOutputStream();bool wrote=false;{std::unique_ptr<juce::AudioFormatWriter> writer(stream?format.createWriterFor(stream.release(),48000,2,24,{},0):nullptr);wrote=writer&&writer->writeFromAudioSampleBuffer(signal,0,96000);}juce::String error;mixer.closeEditors();audio.editStructure([&]{audio.engine.clear();if(wrote)audio.engine.addClip(AudioEngine::loadWav(source,error),error);});editor.reset();refreshTracks();masteringWindow=createMasteringEditor(audio.engine,[this]{dirty=true;});validationMasteringBindings=wrote&&validateMasteringEditor(*masteringWindow,validationDirectory);audio.engine.play();validationStep=1;callbackTicks=0;return;}
+    ++callbackTicks;const int state=validationMasteringBindings?advanceMasteringValidation(*masteringWindow):-1;if(state==0&&callbackTicks<1800)return;
+    const double integrated=audio.engine.mastering->integrated(),peak=audio.engine.mastering->truePeak();if(auto stream=validationDirectory.getChildFile("mastering-panel.png").createOutputStream())juce::PNGImageFormat().writeImageToStream(masteringWindow->createComponentSnapshot(masteringWindow->getLocalBounds()),*stream);masteringWindow.reset();audio.engine.stop();juce::String error;bool roundtrip=false;audio.editStructure([&]{roundtrip=Session::save(validationDirectory.getChildFile("mastering-ui.novadaw"),audio.engine,error)&&Session::load(validationDirectory.getChildFile("mastering-ui.novadaw"),audio.engine,error)&&audio.engine.exportOptions.bits==16&&audio.engine.exportOptions.sampleRate==44100&&audio.engine.exportOptions.normalize;});
+    auto root=std::make_unique<juce::DynamicObject>();root->setProperty("passed",state==1&&validationMasteringBindings&&roundtrip&&std::isfinite(integrated));root->setProperty("exportPanelBindingsAndRealWav",validationMasteringBindings&&state==1);root->setProperty("sessionExportSettingsRoundtrip",roundtrip);root->setProperty("liveMasterLufs",std::isfinite(integrated)?juce::var(integrated):juce::var());root->setProperty("liveMasterTruePeakDb",std::isfinite(peak)?juce::var(peak):juce::var());root->setProperty("deviceCallbackTiming",audio.engine.deviceCallbackTiming());root->setProperty("device",audio.deviceDescription());root->setProperty("hardwareRecordingTested",false);root->setProperty("thirdPartyPluginsTested",false);root->setProperty("error",error);validationDirectory.getChildFile("ui-result.json").replaceWithText(juce::JSON::toString(juce::var(root.release())));dirty=false;juce::JUCEApplication::getInstance()->quit();
+}
 void MainComponent::advancedUiValidation(){
     if(validationStep==0){advancedWindow.reset();closeRecording();closeMidiEditing();mixer.closeEditors();validationDirectory.createDirectory();const auto source=validationDirectory.getChildFile("ui-original.wav");juce::AudioBuffer<float> signal(1,48000);for(int n=0;n<48000;++n)signal.setSample(0,n,0.05f*float(std::sin(2*juce::MathConstants<double>::pi*440*n/48000)));auto stream=source.createOutputStream();stream->setPosition(0);stream->truncate();{juce::WavAudioFormat format;std::unique_ptr<juce::AudioFormatWriter> writer(format.createWriterFor(stream.release(),48000,1,24,{},0));if(writer)writer->writeFromAudioSampleBuffer(signal,0,48000);}juce::String error;
         audio.editStructure([&]{audio.engine.clear();audio.engine.addClip(AudioEngine::loadWav(source,error),error);});editor.reset();editor.select(0,audio.engine.track(0).regions[0].id);refreshTracks();advancedWindow=createAdvancedAudioEditor(audio,editor,[this](auto edit){return applyEdit(std::move(edit));},validationDirectory,[this]{dirty=true;refreshEdited();});validationAdvancedBindings=advancedWindow&&validateAdvancedAudioEditorBindings(*advancedWindow);validationStep=1;callbackTicks=0;return;}
@@ -414,6 +421,7 @@ bool MainComponent::validateEditor() {
 }
 void MainComponent::timerCallback() {
     audio.serviceMaintenance();
+    if(validationMastering){masteringUiValidation();return;}
     if(audio.engine.automation->revision()!=lastAutomationRevision){lastAutomationRevision=audio.engine.automation->revision();dirty=true;}
     if(validationAdvanced){advancedUiValidation();return;}
     if(validationRecording){recordingUiValidation();return;}
