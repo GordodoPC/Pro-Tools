@@ -56,7 +56,7 @@ juce::String MixProcessor::name()const {
 }
 void MixProcessor::prepare(double rate){
     if(prepared && sampleRate==rate && !latencyChanged())return;
-    prepared=false;sampleRate=rate;
+    prepared=false;sampleRate=rate;eqValid=false;
     for(int i=0;i<std::min(parameterCount(),24);++i){smoothed[i].reset(rate,0.02);smoothed[i].setCurrentAndTargetValue(parameter(i));}
     wet.reset(rate,0.005);wet.setCurrentAndTargetValue(bypass.load() || faulted.load() || (kind==EffectKind::vst3 && !plugin) ? 0.0f:1.0f);
     if(kind==EffectKind::delay){delayBuffer.setSize(2,static_cast<int>(rate*2)+mixBlockSize+2);delayBuffer.clear();delayGeneration.assign(static_cast<size_t>(delayBuffer.getNumSamples()),0);currentDelayGeneration=1;}
@@ -85,7 +85,12 @@ std::array<std::array<float,6>,7> eqCoefficients(const std::array<float,24>& p,d
     return coefficients;
 }
 }
-void MixProcessor::updateEq(const std::array<float,24>& p,double rate){coefficients=eqCoefficients(p,rate);}
+void MixProcessor::updateEq(const std::array<float,24>& p,double rate){
+    if(eqValid&&p==lastEqParameters)return;
+    coefficients=eqCoefficients(p,rate);
+    for(auto& a:coefficients){const float denominator=a[3];for(auto& value:a)value/=denominator;}
+    lastEqParameters=p;eqValid=true;++eqRebuilds;
+}
 void MixProcessor::process(juce::AudioBuffer<float>& buffer,int frames,const juce::MidiBuffer* inputMidi,int midiOffset)noexcept {
     if(frames<1 || frames>mixBlockSize || buffer.getNumChannels()<2 || buffer.getNumSamples()<frames)return;
     auto* l=buffer.getWritePointer(0);auto* r=buffer.getWritePointer(1);
@@ -114,7 +119,7 @@ void MixProcessor::process(juce::AudioBuffer<float>& buffer,int frames,const juc
                 if((s%16)==0)updateEq(p,sampleRate);
                 for(int c=0;c<2;++c){float value=buffer.getSample(c,s);
                     for(int b=0;b<7;++b){const auto& a=coefficients[b];auto& z=filterState[c][b];
-                        const float y=a[0]/a[3]*value+z[0];z[0]=a[1]/a[3]*value-a[4]/a[3]*y+z[1];z[1]=a[2]/a[3]*value-a[5]/a[3]*y;value=y;}
+                        const float y=a[0]*value+z[0];z[0]=a[1]*value-a[4]*y+z[1];z[1]=a[2]*value-a[5]*y;value=y;}
                     buffer.setSample(c,s,value);
                 }
             }else if(kind==EffectKind::compressor){

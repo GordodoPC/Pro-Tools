@@ -341,8 +341,8 @@ void MainComponent::addMidiTrack(){juce::String error;bool ok=false;audio.editSt
     if(!ok){showError(error);return;}dirty=true;editor.reset();editor.select(audio.engine.trackCount()-1,audio.engine.track(audio.engine.trackCount()-1).midiClips.front().id);refreshTracks();openMidiEditor();}
 void MainComponent::openMidiEditor(){int index=editor.selectedTrack;if(index<0||index>=audio.engine.trackCount()||!audio.engine.track(index).midiTrack){index=-1;for(int i=0;i<audio.engine.trackCount();++i)if(audio.engine.track(i).midiTrack){index=i;break;}}
     if(index<0){showError("Crie uma faixa MIDI primeiro.");return;}midiWindow=createMidiEditor(audio,index,mixer.pluginCatalog(),[this]{dirty=true;refreshEdited();},(currentSession==juce::File{}?juce::File(NOVA_PROJECT_ROOT):currentSession.getParentDirectory()).getChildFile("Recordings/MIDI"),editor.selectedRegion);}
-void MainComponent::enableUiValidation(const juce::File& dir) { validationDirectory = dir; validationStep = 0; }
-void MainComponent::enableMidiUiValidation(const juce::File& dir){validationDirectory=dir;validationStep=0;validationMidi=true;}
+void MainComponent::enableUiValidation(const juce::File& dir) { audio.engine.measureDeviceCallbacks=true;validationDirectory = dir; validationStep = 0; }
+void MainComponent::enableMidiUiValidation(const juce::File& dir){audio.engine.measureDeviceCallbacks=true;validationDirectory=dir;validationStep=0;validationMidi=true;}
 void MainComponent::midiUiValidation(){
     if(++callbackTicks%10!=0)return;
     if(validationStep==0){
@@ -361,7 +361,7 @@ void MainComponent::midiUiValidation(){
         const auto file=validationDirectory.getChildFile("phase4-ui.novadaw");audio.editStructure([&]{saved=Session::save(file,audio.engine,error);loaded=saved&&Session::load(file,audio.engine,error);});
         auto result=std::make_unique<juce::DynamicObject>();const bool midiData=loaded&&audio.engine.track(0).midiTrack&&audio.engine.track(0).midiClips[0].notes.size()>=2&&audio.engine.track(0).instrument&&audio.engine.track(0).instrument->plugin;
         result->setProperty("passed",validationMidiBindings&&validationMidiAudio&&midiData);result->setProperty("pianoRollEditingUndoRedo",validationMidiBindings);result->setProperty("hardwareInstrumentAudioNonzero",validationMidiAudio);result->setProperty("sessionMidiInstrumentRoundtrip",midiData);
-        result->setProperty("tempo",audio.engine.bpm.load());result->setProperty("device",audio.deviceDescription());result->setProperty("physicalMidiInputTested",false);result->setProperty("thirdPartyInstrumentTested",false);
+        result->setProperty("tempo",audio.engine.bpm.load());result->setProperty("device",audio.deviceDescription());result->setProperty("deviceCallbackTiming",audio.engine.deviceCallbackTiming());result->setProperty("physicalMidiInputTested",false);result->setProperty("thirdPartyInstrumentTested",false);
         validationDirectory.getChildFile("ui-result.json").replaceWithText(juce::JSON::toString(juce::var(result.release()),false));dirty=false;stopTimer();juce::JUCEApplication::getInstance()->quit();return;
     }
     ++validationStep;
@@ -466,7 +466,7 @@ void MainComponent::timerCallback() {
         const bool ok = validationPhase3 && validationEditing && validationLoop && validationControls && validationImported && validationResume && validationSawPlay && validationSawAudio && validationSawPause
             && !audio.engine.isPlaying() && audio.engine.position() == 0 && audio.engine.trackCount() >= 2;
         auto root = std::make_unique<juce::DynamicObject>();
-        root->setProperty("phase3NativeEditorSendAutomationMaster",validationPhase3);root->setProperty("passed",ok); root->setProperty("play",validationSawPlay); root->setProperty("hardwareCallbackNonzero",validationSawAudio);
+        root->setProperty("deviceCallbackTiming",audio.engine.deviceCallbackTiming());root->setProperty("phase3NativeEditorSendAutomationMaster",validationPhase3);root->setProperty("passed",ok); root->setProperty("play",validationSawPlay); root->setProperty("hardwareCallbackNonzero",validationSawAudio);
         root->setProperty("wavImport",validationImported); root->setProperty("resume",validationResume);
         root->setProperty("editMixControlBindings",validationControls);
         root->setProperty("editingGesturesShortcutsLayoutSession",validationEditing); root->setProperty("hardwareLoop",validationLoop);

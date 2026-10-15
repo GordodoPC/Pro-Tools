@@ -26,7 +26,7 @@ build/testes; não são benchmark isolado de desempenho.
 | 4 | MIDI/Piano Roll/VST3i/SMF/captura implementados | Entrada MIDI física, jitter/hotplug e instrumentos externos |
 | 5 | Captura multipista/punch/loop/takes/recuperação implementados | Entradas físicas multicanal, calibração de latência, desconexão e disco cheio real |
 | 6 | Fades/slip/ripple/comp/stretch/pitch/consolidate/bounce implementados | Audição de material complexo, sessões longas e falhas reais de IO/plugins |
-| 7 | Implementação ainda não iniciada; não há escopo funcional aprovado neste roadmap | Definir requisitos e aceitação após avaliar as evidências e limitações anteriores |
+| 7 | Autorizada em nova solicitação de 2026-10-15; estabilidade em validação | Automação avançada, grupos/sidechain, masterização/exportação e UI conforme roadmap.md |
 
 O aceite funcional das Fases 4–6 já tinha evidência automatizada, incluindo
 áudio de instrumentos reais próprios e WAVs reais de entradas simuladas. Isso
@@ -50,6 +50,10 @@ continua sem bloquear correções independentes nessas fases.
   nem notificações que só chegam depois do término do render.
 
 ## Preparação para a Fase 7
+
+Nota de atualização: a situação sem escopo descrita nesta seção era a da primeira
+retomada. Uma nova solicitação explícita autorizou a Fase 7, agora registrada em
+[roadmap.md](roadmap.md), com execução em [phase7-report.md](phase7-report.md).
 
 A base continua C++20/JUCE 9.0.4/CMake, sessão v6 compatível com v1–5, um
 proprietário de MutationGuard, filas/buffers limitados e trabalho de disco fora

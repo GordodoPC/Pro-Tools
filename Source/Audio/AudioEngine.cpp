@@ -155,6 +155,13 @@ uint64_t AudioEngine::contentionDropouts()const {
     uint64_t total=0;for(int i=0;i<count;++i){if(track(i).instrument)total+=track(i).instrument->contentionDropouts();for(const auto& insert:track(i).inserts)if(insert)total+=insert->contentionDropouts();}
     for(const auto& insert:masterInserts)if(insert)total+=insert->contentionDropouts();return total;
 }
+size_t AudioEngine::ownedBufferBytes()const {
+    size_t total=size_t(bytes)+compensation.allocatedBytes+clickCompensation.bytes();
+    for(const auto& buffer:channelBuffers)total+=size_t(buffer.getNumSamples())*buffer.getNumChannels()*sizeof(float);
+    total+=size_t(masterBuffer.getNumSamples())*masterBuffer.getNumChannels()*sizeof(float);
+    for(int i=0;i<count;++i){if(track(i).instrument)total+=track(i).instrument->ownedBufferBytes();for(const auto& p:track(i).inserts)if(p)total+=p->ownedBufferBytes();}
+    for(const auto& p:masterInserts)if(p)total+=p->ownedBufferBytes();return total;
+}
 void AudioEngine::closeEditors(){MutationGuard mutation(*this);for(int i=0;i<count;++i){if(track(i).instrument)track(i).instrument->closeEditor();for(auto& p:track(i).inserts)if(p)p->closeEditor();}for(auto& p:masterInserts)if(p)p->closeEditor();}
 void AudioEngine::replaceSession(AudioEngine& other) {
     MutationGuard mutation(*this);
@@ -209,11 +216,11 @@ void AudioEngine::renderWithInput(const float* const* input,int inputs,float* co
 void AudioEngine::renderInternal(float* const* output,int channels,int frames,double monotonicSeconds,const float* const* input,int inputs) noexcept {
     if(!output || channels<1 || frames<1)return;
     for(int c=0;c<channels;++c)if(output[c])std::fill_n(output[c],frames,0.0f);
-    unsigned expected=0;if(!processingGate.compare_exchange_strong(expected,1,std::memory_order_acquire))return;
+    unsigned expected=0;if(!processingGate.compare_exchange_strong(expected,1,std::memory_order_acquire)){++gatedCallbacks;return;}
     struct Release {std::atomic<unsigned>& gate;~Release(){gate.fetch_sub(1,std::memory_order_release);}} release{processingGate};
     // A rate/latency transition is serviced off-thread; emit silence instead of misaligned audio.
     midiIO->clockSequence.fetch_add(1,std::memory_order_acq_rel);midiIO->renderWallTime=std::isfinite(monotonicSeconds)&&monotonicSeconds>=0?monotonicSeconds:juce::Time::getMillisecondCounterHiRes()*0.001;midiIO->clockFrames=frames;midiIO->clockRate=sampleRate();midiIO->clockSequence.fetch_add(1,std::memory_order_release);
-    if(!pdcReady.load() || needsMaintenance())return;
+    if(!pdcReady.load() || needsMaintenance()){++maintenanceSilences;return;}
     const auto generation=seekGeneration.load(std::memory_order_acquire);
     if(generation!=consumedSeek){renderPosition=requestedPosition.load(std::memory_order_relaxed);consumedSeek=generation;seekOrigin=renderPosition;elapsedSinceSeek=0;compensation.reset();resumeMidi.fill(true);lastMidiTime.fill(-1);lastClickBeat=-1;clickRemaining=0;clickCompensation.reset();
         // Seeking resets native tails. VST3 reset is a lifecycle operation and stays off the callback.
@@ -414,7 +421,18 @@ void AudioEngine::consumeMidiInput(int frames)noexcept{
 }
 void AudioEngine::audioDeviceIOCallbackWithContext(const float* const* input, int inputs,
     float* const* out, int channels, int samples, const juce::AudioIODeviceCallbackContext&) {
+    const bool measure=measureDeviceCallbacks.load(std::memory_order_relaxed);
+    const auto before=measure?juce::Time::getHighResolutionTicks():0;
     renderWithInput(input,inputs,out, channels, samples);
+    if(measure){const auto ticks=uint64_t(juce::Time::getHighResolutionTicks()-before);const double us=double(ticks)*1e6/juce::Time::getHighResolutionTicksPerSecond();
+        ++deviceTimingHistogram[std::min<size_t>(127,size_t(us/100))];deviceTotalTicks+=ticks;if(ticks>deviceMaxTicks.load(std::memory_order_relaxed))deviceMaxTicks=ticks;
+        if(us>samples/requestedDeviceRate.load()*1e6)++deviceDeadlineOverruns;++deviceCallbackCount;}
+}
+juce::var AudioEngine::deviceCallbackTiming()const {
+    auto result=std::make_unique<juce::DynamicObject>();const auto callbacks=deviceCallbackCount.load();const double factor=1e6/juce::Time::getHighResolutionTicksPerSecond();
+    result->setProperty("callbacks",int64_t(callbacks));result->setProperty("overruns",int64_t(deviceDeadlineOverruns.load()));result->setProperty("maxUs",deviceMaxTicks.load()*factor);result->setProperty("meanUs",callbacks?deviceTotalTicks.load()*factor/callbacks:0);
+    for(auto percentile:{50,95,99}){uint64_t accumulated=0;double upper=0;for(size_t bin=0;bin<deviceTimingHistogram.size();++bin){accumulated+=deviceTimingHistogram[bin].load();if(callbacks&&accumulated>=((callbacks*percentile+99)/100)){upper=bin==127?-1:double(bin+1)*100;break;}}result->setProperty("p"+juce::String(percentile)+"UpperUs",upper);}
+    result->setProperty("histogramOverflowCount",int64_t(deviceTimingHistogram.back().load()));return juce::var(result.release());
 }
 void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device) { monitoringAllowed=false;requestedDeviceRate.store(device->getCurrentSampleRate()); }
 void AudioEngine::audioDeviceStopped() { monitoringAllowed=false;pause(); }

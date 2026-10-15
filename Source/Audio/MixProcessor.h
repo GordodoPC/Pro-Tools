@@ -42,6 +42,8 @@ public:
     int latencySamples() const noexcept { return preparedLatency; }
     bool latencyChanged() const noexcept;
     uint64_t contentionDropouts() const noexcept;
+    size_t ownedBufferBytes()const{return dryCompensation.bytes()+size_t(delayBuffer.getNumSamples())*delayBuffer.getNumChannels()*sizeof(float)+delayGeneration.capacity()*sizeof(uint32_t);}
+    uint64_t eqCoefficientRebuilds()const{return eqRebuilds;} // inspect only when render is quiesced
     static constexpr int maximumInsertLatency = 65536;
 private:
     int preparedLatency = 0, missingLatency = 0;
@@ -51,6 +53,9 @@ private:
     std::array<juce::SmoothedValue<float>, 24> smoothed;
     juce::SmoothedValue<float> wet;
     std::array<std::array<float, 6>, 7> coefficients{};
+    std::array<float,24> lastEqParameters{};
+    bool eqValid=false;
+    uint64_t eqRebuilds=0;
     std::array<std::array<std::array<float, 2>, 7>, 2> filterState{};
     juce::AudioBuffer<float> delayBuffer;
     std::vector<uint32_t> delayGeneration;

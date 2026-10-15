@@ -132,6 +132,10 @@ public:
     int latencySamples() const { return visibleLatency.load(); }
     juce::String processingError() const { return configurationError; } // control thread only
     uint64_t contentionDropouts() const;
+    size_t ownedBufferBytes() const; // control thread, accounting excludes opaque plugin heaps
+    std::atomic<uint64_t> gatedCallbacks{0},maintenanceSilences{0};
+    std::atomic<bool> measureDeviceCallbacks{false};
+    juce::var deviceCallbackTiming()const; // control thread; 100 us histogram bins
     void setSmoothingTime(double seconds);
     double smoothingSeconds()const{return smoothingTime;}
     int trackCount() const { return count; }
@@ -198,6 +202,8 @@ private:
     float blockMasterPeak = 0, blockMasterRms = 0;
     std::atomic<unsigned> processingGate{0};
     int mutationDepth = 0;
+    std::array<std::atomic<uint64_t>,128> deviceTimingHistogram{};
+    std::atomic<uint64_t> deviceCallbackCount{0},deviceDeadlineOverruns{0},deviceTotalTicks{0},deviceMaxTicks{0};
     DelayCompensation compensation;
     std::unique_ptr<MidiIO> midiIO;
     StereoDelay clickCompensation;

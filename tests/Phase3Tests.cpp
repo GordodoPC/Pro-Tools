@@ -50,6 +50,10 @@ int main(int argc,char** argv){juce::ScopedJuceInitialiser_GUI gui;try{
     signal=constant(48000,0);for(int c=0;c<2;++c)for(int s=0;s<48000;++s)signal.setSample(c,s,0.1f*float(std::sin(2*juce::MathConstants<double>::pi*1000*s/48000)));
     process(eq,signal);expect(near(signal.getRMSLevel(0,40000,8000),0.1f*std::sqrt(0.5f)*juce::Decibels::decibelsToGain(6.0f),0.001f),"parametric EQ boosts sine at center frequency by 6 dB");
     expect(std::abs(eq.magnitude(1000,48000)-juce::Decibels::decibelsToGain(6.0f))<0.001,"EQ response visualization uses matching coefficients");
+    expect(eq.eqCoefficientRebuilds()==1,"stationary EQ computes coefficients once instead of every sixteen samples");
+    eq.setParameter(12,0);signal=constant(48000,0.1f);process(eq,signal);const auto changedEq=eq.eqCoefficientRebuilds();
+    expect(changedEq>1&&std::abs(signal.getSample(0,47999)-0.1f)<0.001f,"EQ cache follows smoothed parameter changes and preserves steady signal");
+    eq.prepare(96000);signal=constant(256,0.1f);process(eq,signal);expect(eq.eqCoefficientRebuilds()==changedEq+1,"sample-rate preparation invalidates stationary EQ coefficient cache");
     for(auto kind:{nova::EffectKind::equalizer,nova::EffectKind::compressor,nova::EffectKind::gate,nova::EffectKind::delay,nova::EffectKind::reverb}){
         nova::MixProcessor p(kind);p.prepare(48000);auto restored=nova::MixProcessor::restore(p.state(),48000,error);expect(restored && restored->kind==kind,"native effect state roundtrip");
     }

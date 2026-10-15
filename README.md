@@ -291,3 +291,13 @@ no último bloco e exceção com bypass automático. Transições são injetadas
 fixture interna controlada; os testes também processam os VST3/VST3i reais próprios.
 O bounce abortado não publica WAV parcial e encerra seu transporte offline.
 Notificações externas que chegam depois do render continuam fora dessa garantia.
+
+## Desenvolvimento da Fase 7
+
+Escopo: [docs/roadmap.md](docs/roadmap.md). Resultados e limites:
+[docs/phase7-report.md](docs/phase7-report.md).
+O teste prolongado conserva o critério de prazo `frames/sampleRate` e agora
+registra P50/P95/P99, detalhes de cada overrun, ciclos da thread, atrasos para
+acordar e contadores de silêncio por mutação/manutenção. Também mede buffers
+conhecidos, alocações C++ vivas e memória após limpar a sessão. Ciclos não são
+convertidos em tempo; probes não cobrem todos os alocadores de DLLs.

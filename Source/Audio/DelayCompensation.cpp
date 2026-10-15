@@ -15,7 +15,7 @@ void StereoDelay::reset() noexcept {
 std::array<float,2> StereoDelay::process(float left,float right) noexcept {
     if(cells.empty())return {left,right};
     auto& cell=cells[write];const auto result=cell.generation==generation?cell.value:std::array<float,2>{};
-    cell.value={left,right};cell.generation=generation;write=(write+1)%cells.size();return result;
+    cell.value={left,right};cell.generation=generation;if(++write==cells.size())write=0;return result;
 }
 bool DelayCompensation::build(const std::vector<PdcNode>& nodes,int masterLatency,juce::String& error) {
     const int count=static_cast<int>(nodes.size());

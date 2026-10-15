@@ -114,3 +114,25 @@
   `build/ninja-release/NovaDAW_artefacts/Release/NOVA DAW.exe`;
   SHA256 `0976427221EC4B7572578C00D96789C77B4F64EE91DBD5A36BF35827F76DC21F`.
   Snapshot Release do editor avançado inspecionado visualmente.
+
+## 2026-10-15 — Fase 7, ciclo de estabilidade
+
+- Escopo explicitamente autorizado pelo usuário, registrado em roadmap.md;
+  base 73f07da/a8df20d preservada. Relatório novo phase7-report.md.
+- Instrumentação limitada de callbacks: percentis, cada overrun, ciclos,
+  atraso de despertar, contexto de controle e silêncios por gate/manutenção.
+  Memória: buffers conhecidos, C++ vivos e liberação após clear; sem forçar heap.
+- Antes instrumentado 300,068 s: 4 overruns, max13,190ms, P50/P95/P99
+  911/4254/5831us, CPU18,66%, zero new observado/controle/contenção VST.
+  Private 92655616→110940160 bytes; após clear93257728; C++ vivos crescem44870
+  bytes com histórico das medições. Limitações de atribuição registradas.
+- EQ elimina coeficientes redundantes/divisões por amostra; PDC avança sem módulo.
+  Builds Debug/Release e CTest12/12 aprovados, 516 checks + dois smoke por build.
+  Comparação após correções em execução por300s com critérios originais.
+- Fechamento da etapa1: depois300,063s, 2 overruns, max9,458ms,
+  P50/P95/P99 908/4162/5554us, CPU18,44%, zero new/erros/contenção VST;
+  private94027776→111779840, após clear95019008 bytes. Dados completos e
+  limitações em phase7-report.md; CPU mudou pouco e dois atrasos permanecem.
+- Callback Realtek medido nas UIs Edit/Mix e MIDI das duas builds: zero overrun;
+  Release max274,6/127,7us, Debug3332,5/999,9us. Cenas menores, sem certificação
+  de carga máxima. CTest final Debug12/12 31,16s; Release12/12 17,12s.

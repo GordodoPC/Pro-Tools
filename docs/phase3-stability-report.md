@@ -337,3 +337,15 @@ Reprodução: comando de 300 s do README, usando essa pasta como primeiro argume
 Probe Release observa C++ new, sem instrumentar todo malloc/alocador estrangeiro.
 Hardware e terceiros não foram usados neste ensaio; investigação de prazos,
 crescimento de memória e execução de horas permanecem pendentes.
+
+## Investigação solicitada na Fase 7 — 2026-10-15
+
+Histórico preservado; instrumentação e comparação detalhada em
+[phase7-report.md](phase7-report.md). Não há dados individuais dos nove atrasos
+históricos, portanto sua atribuição exata não é possível retrospectivamente.
+Novo ensaio instrumentado de 300 s contou quatro atrasos e separou gate,
+manutenção, wall time, ciclos e bytes C++ vivos da memória privada do processo.
+A limpeza da sessão liberou 17682432 bytes privados; o crescimento de objetos
+medidos acompanha o histórico das medições. Isso não certifica DLLs/alocadores
+não instrumentados. Cache de coeficientes EQ e avanço PDC sem divisão passam
+nos testes Debug/Release; comparação prolongada após correções em andamento.
