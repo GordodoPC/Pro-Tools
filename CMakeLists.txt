@@ -150,4 +150,9 @@ if(BUILD_TESTING)
     target_link_libraries(NovaDiagnosticsTests PRIVATE NovaCore)
     add_test(NAME DiagnosticsAndPaths COMMAND NovaDiagnosticsTests "${CMAKE_BINARY_DIR}/diagnostic-data")
     set_tests_properties(DiagnosticsAndPaths PROPERTIES TIMEOUT 30)
+    add_test(NAME ScannerUnicodePaths COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${CMAKE_SOURCE_DIR}/scripts/test-scanner-unicode.ps1"
+        -Scanner "$<TARGET_FILE:NovaPluginScanner>" -Plugin "$<TARGET_FILE:NovaTestSynth_VST3>"
+        -OutputDirectory "${CMAKE_BINARY_DIR}/scanner-unicode")
+    set_tests_properties(ScannerUnicodePaths PROPERTIES TIMEOUT 45)
 endif()

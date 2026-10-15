@@ -2,7 +2,7 @@
 
 Alpha0.7 Public Test: candidato **local**, licença em decisão e publicação bloqueada.
 Instalador EXE/MSI, desinstalador, atalhos/runtime e diagnósticos implementados;
-CTest16/16 Debug/Release,622checks+2smoke, dez UIs e26checks de instalação aprovados.
+CTest17/17 Debug/Release,625checks+2smoke, dez UIs e26checks de instalação aprovados.
 Estado atual de entrega: [alpha07-release-report.md](alpha07-release-report.md).
 Fase7 permanece parcial quanto a prazos; empacotamento não encerra essa pendência.
 

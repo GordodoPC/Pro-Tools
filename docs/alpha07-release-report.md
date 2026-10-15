@@ -99,7 +99,7 @@ Referências primárias: [licença JUCE](https://juce.com/legal/juce-9-licence/)
 
 ## Evidência automática já executada
 
-Builds Debug/Release aprovados. CTest16/16 Debug35,57s e Release17,29s,
+Primeiro ciclo: builds Debug/Release aprovados, CTest16/16 Debug35,57s e Release17,29s,
 622 verificações+dois smoke por configuração. Dez UIs passaram em
 `build/alpha07-ui-{editmix,midi,recording,advanced,mastering}-{debug,release}`.
 Após inicialização silenciosa, Edit/Mix reexecutado/aprovado nas duas builds em
@@ -120,6 +120,18 @@ Executável Release Alpha validado:
 `488815BB683BBA913768FDD6786D66CF86E9F48FB9CFF4740C1A23970FF03A32`.
 O pacote final de revisão é gerado após registrar este código e será revalidado
 pelo mesmo roteiro; hashes e resultado final serão registrados a seguir.
+
+### Regressão Unicode detectada na revisão dos ZIPs
+
+O pacote inicialmente aprovado em instalação ASCII falhou ao varrer VST3 em
+pasta portátil comç: main/argv narrow era decodificado como UTF-8, embora o CRT
+Windows fornecesse outra codificação. Corrigido para wmain/argv UTF-16 no scanner.
+ScannerUnicodePaths copia bundle real para caminho acentuado e verifica processo,
+metadata e caminho Unicode persistido em XML. **CTest final17/17 Debug40,52s e
+Release19,01s**,625checks+dois smoke por configuração, todas as suítes preservadas.
+Scanner Release SHA256`F5EDB3B6B9391B72E97037FEDBC09ABCA18FDA892DE1DB20C816951C93FA48F7`.
+O pacote anterior não é o candidato final; revisão nova será gerada em
+`build/releases/alpha-0.7-review-final` com esta correção e novas verificações.
 
 ## Critérios para liberar
 

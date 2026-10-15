@@ -45,7 +45,7 @@ aceite funcional automatizado. Nenhuma fase anterior foi removida ou reiniciada.
 ## Primeira Alpha — revisão local
 
 NOVA DAW Alpha0.7 Public Test: instalador EXE/MSI x64, desinstalação/atalhos,
-runtime local e diagnósticos preparados e testados neste computador. CTest16/16
+runtime local e diagnósticos preparados e testados neste computador. CTest17/17
 Debug/Release e26 verificações de instalação aprovados. Licença pública em decisão,
 revisão do usuário, estabilidade e máquina limpa continuam bloqueios de publicação.
 Não publicar automaticamente. [Relatório](alpha07-release-report.md).

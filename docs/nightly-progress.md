@@ -224,3 +224,16 @@
   completar, além de o registro desaparecer; sentinela é mantida sem limpeza recursiva.
 - Release Alpha SHA256488815BB683BBA913768FDD6786D66CF86E9F48FB9CFF4740C1A23970FF03A32.
   Publicação continua bloqueada: licença/revisão, dez overruns históricos e outro PC.
+
+## 2026-10-15 — correção Unicode antes de entregar Alpha
+
+- Instalação do candidato aa241ea passou26checks; teste adicional de ZIP em
+  caminho comç revelou argv narrow interpretado como UTF-8 pelo scanner.
+- Corrigido PluginScanner para wmain UTF-16, incluindo entrada VST3 e saída XML.
+  ScannerUnicodePaths acrescenta3checks reais e falhou antes da correção no
+  pacote portátil. Não se declarou esse pacote antigo pronto.
+- Build Debug/Release e CTest17/17 aprovados:40,52s/19,01s,625checks+2smoke.
+  Alpha exe permaneceSHA488815BB683BBA913768FDD6786D66CF86E9F48FB9CFF4740C1A23970FF03A32;
+  scanner corrigidoF5EDB3B6B9391B72E97037FEDBC09ABCA18FDA892DE1DB20C816951C93FA48F7.
+- Novo pacote em build/releases/alpha-0.7-review-final sera revalidado antes de
+  informar caminhos definitivos; publicacao continua bloqueada para revisao local.
