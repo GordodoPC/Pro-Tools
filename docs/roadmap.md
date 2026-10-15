@@ -49,3 +49,8 @@ runtime local e diagnósticos preparados e testados neste computador. CTest17/17
 Debug/Release e26 verificações de instalação aprovados. Licença pública em decisão,
 revisão do usuário, estabilidade e máquina limpa continuam bloqueios de publicação.
 Não publicar automaticamente. [Relatório](alpha07-release-report.md).
+
+Entrega de revisão local em `build/releases/alpha-0.7-local-review`, com instalador
+efetivamente validado, portátil testado em caminho Unicode, fontes sem cache local,
+inventário/licenças, comprovante de testes e hashes conferidos. Instalação existente
+preservada. Próximo aceite público continua dependendo dos bloqueios acima.

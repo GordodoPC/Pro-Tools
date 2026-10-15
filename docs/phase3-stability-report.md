@@ -381,3 +381,11 @@ CTest16/16 Debug/Release,622checks+2smoke; instalação/scanner/áudio de instru
 próprio e exportação passaram no computador original. Nenhum novo ensaio300s de
 áudio Alpha com logging foi inferido desses testes curtos: prazos continuam
 parciais e bloqueiam aceite público. [Relatório](alpha07-release-report.md).
+
+Fechamento Alpha: após correção Unicode no scanner, Debug/Release e CTest17/17
+passaram,625checks+2smoke por configuração. Instalador26checks e portátil Unicode
+aprovados; fontes filtradas para não incluir cache PowerShell local. Cena Master
+curta instalada81callbacks, máximo141,9µs e zero overrun; portátil82callbacks,
+máximo92,7µs e zero overrun. Isso não repete nem substitui o ensaio integrado300s.
+Entrega para revisão em `build/releases/alpha-0.7-local-review`; licença e aceite
+de prazos continuam pendentes, instalação em revisão manual preservada.

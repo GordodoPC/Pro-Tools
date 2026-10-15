@@ -4,6 +4,10 @@ Alpha0.7 Public Test: candidato **local**, licença em decisão e publicação b
 Instalador EXE/MSI, desinstalador, atalhos/runtime e diagnósticos implementados;
 CTest17/17 Debug/Release,625checks+2smoke, dez UIs e26checks de instalação aprovados.
 Estado atual de entrega: [alpha07-release-report.md](alpha07-release-report.md).
+Pacote para revisão: `build/releases/alpha-0.7-local-review`; binários90b4371
+revalidados em26checks e portátil com Unicode aprovado; fontes filtradas c12ab4f.
+`VALIDATION.json` registra evidência sanitizada; hashes de toda a entrega conferidos.
+Instalação encontrada fora do ensaio foi preservada; nenhuma publicação executada.
 Fase7 permanece parcial quanto a prazos; empacotamento não encerra essa pendência.
 
 Entrega atual: automação Write/Touch/Latch/Read e curvas/Undo, VCA/grupos,

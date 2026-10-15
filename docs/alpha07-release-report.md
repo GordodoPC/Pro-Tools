@@ -118,8 +118,7 @@ na antiga pasta da instalação como evidência; não se limpa recursivamente us
 Executável Release Alpha validado:
 `build/ninja-release/NovaDAW_artefacts/Release/NOVA DAW.exe`, SHA256
 `488815BB683BBA913768FDD6786D66CF86E9F48FB9CFF4740C1A23970FF03A32`.
-O pacote final de revisão é gerado após registrar este código e será revalidado
-pelo mesmo roteiro; hashes e resultado final serão registrados a seguir.
+O pacote final de revisão foi gerado e revalidado conforme os resultados abaixo.
 
 ### Regressão Unicode detectada na revisão dos ZIPs
 
@@ -130,8 +129,55 @@ ScannerUnicodePaths copia bundle real para caminho acentuado e verifica processo
 metadata e caminho Unicode persistido em XML. **CTest final17/17 Debug40,52s e
 Release19,01s**,625checks+dois smoke por configuração, todas as suítes preservadas.
 Scanner Release SHA256`F5EDB3B6B9391B72E97037FEDBC09ABCA18FDA892DE1DB20C816951C93FA48F7`.
-O pacote anterior não é o candidato final; revisão nova será gerada em
-`build/releases/alpha-0.7-review-final` com esta correção e novas verificações.
+O pacote anterior à correção Unicode não é o candidato final. Os binários de
+`build/releases/alpha-0.7-review-final` passaram novamente nas 26 verificações em
+`build/alpha07-install-review-final/installation-result.json`.
+
+### Arquivos entregues para revisão local
+
+Pasta definitiva: **`build/releases/alpha-0.7-local-review`**. Contém:
+
+| Arquivo | Finalidade |
+|---|---|
+| NOVA-DAW-Alpha-0.7-Public-Test-x64-Setup.exe | Instalador x64, 6.795.776 bytes |
+| NOVA-DAW-Alpha-0.7-Public-Test-x64.msi | Pacote Windows Installer incorporado no EXE |
+| Desinstalar NOVA DAW Alpha 0.7.exe | Desinstalador; também instalado e registrado |
+| NOVA-DAW-Alpha-0.7-Public-Test-x64-portable.zip | Aplicativo, scanner, instrumento e runtime app-local |
+| NOVA-DAW-Alpha-0.7-source-review.zip | Fontes NOVA/JUCE/patches, 5.454 entradas |
+| README-TESTADORES.md / RELEASE-NOTES.md | Uso, dados, testes manuais e limites |
+| THIRD-PARTY-NOTICES.md / dependency-inventory.json | Inventário de dependências e avisos |
+| RELEASE-STATUS.json / VALIDATION.json / SHA256SUMS.txt | Bloqueios, comprovante sanitizado e integridade |
+
+SHA256 do Setup: `FFEAB60240C76D24F30777DC97B3D9DECAADBDD082D27448230CC3EDAC209460`.
+Todos os hashes listados foram recalculados e conferidos. EXE/MSI/desinstalador/ZIP
+portátil são cópias **byte a byte** dos artefatos efetivamente testados, base
+90b4371. O comprovante não inclui logs MSI brutos, nome da máquina ou SID.
+
+O portátil passou em pasta com acento: hashes, scanner de instrumento VST3 real,
+exportação WAV e reabertura de configurações. Artefato:
+`build/alpha07-artifact-review-final/artifact-result.json`. Cancelamento com Não
+na confirmação do Setup retornou1602 antes de instalar. O primeiro ensaio dessa
+automação falhou por limitações de UIAutomation/leitura do exit code; repetido
+com handle de processo mantido e mensagem Win32 à própria janela, foi aprovado.
+Isso não cobre cancelamento no meio da cópia, rollback ou falhas de disco.
+
+No fluxo Master instalado:81 callbacks, zero overruns, máximo141,9µs, média45,97µs;
+no portátil:82 callbacks, zero overruns, máximo92,7µs, média38,27µs, Realtek48k/480.
+São cenas curtas de UI/exportação; **não substituem o stress integrado de300s**.
+
+Na auditoria do ZIP encontrou-se um cache PowerShell já versionado. O arquivo
+original foi preservado; o empacotador passou a restringir explicitamente as
+raízes de fontes. ZIP corrigido de c12ab4f exclui esse cache, .git, build e dados
+NOVA do usuário, mantendo assets de exemplo do JUCE. Esse commit altera apenas o
+empacotamento, sem mudar o código dos binários de90b4371.
+
+Também foi gerado um pacote completo intermediário em `alpha-0.7-review-final2`,
+mas uma Alpha apareceu instalada fora do roteiro automatizado. O teste recusou
+removê-la; instalação existente preservada, sem reparo ou encerramento forçado.
+O usuário confirmou que iniciou a revisão manual e pediu preservar a instalação.
+Não se declara o instalador intermediário novamente testado. A entrega definitiva
+reúne os binários já aprovados e apenas o ZIP de fontes filtrado desse ciclo.
+Pacotes anteriores permanecem para auditoria; usar **alpha-0.7-local-review**.
 
 ## Critérios para liberar
 

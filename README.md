@@ -376,8 +376,8 @@ Após compilar Release e executar os testes, gere uma pasta NOVA (o script recus
 substituir pacote de revisão existente):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-alpha.ps1 -OutputDirectory build/releases/alpha-0.7-review
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-alpha-install.ps1 -PackageDirectory build/releases/alpha-0.7-review -ReportDirectory "$PWD\build\alpha07-install-review"
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-alpha.ps1 -OutputDirectory build/releases/alpha-0.7-next-review
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-alpha-install.ps1 -PackageDirectory build/releases/alpha-0.7-next-review -ReportDirectory "$PWD\build\alpha07-install-next-review"
 ```
 
 A política PowerShell fica limitada a esses processos. O empacotador usa somente
@@ -393,3 +393,9 @@ nenhuma telemetria automática. Para testes isolados, `--data-dir "pasta absolut
 Leia [packaging/README-TESTADORES.md](packaging/README-TESTADORES.md).
 RELEASE-STATUS.json mantém publicação bloqueada até licença, revisão, estabilidade
 e ensaio em outro computador. O pacote não é declarado pronto pelo simples build.
+
+Entrega já validada para revisão: `build/releases/alpha-0.7-local-review`.
+Setup/MSI/portátil passaram nos ensaios documentados; `VALIDATION.json` registra
+o alcance, e `SHA256SUMS.txt` permite conferir os arquivos. A instalação existente
+neste computador foi preservada. Usar esta pasta, mantendo pacotes anteriores
+apenas como histórico de investigação. Licença e estabilidade continuam pendentes.

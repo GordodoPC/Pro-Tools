@@ -426,3 +426,11 @@ decisão de licença, revisão do instalador, estabilidade e máquina limpa. CTe
 anteriores. Corrigidas inicializações assíncronas de controles que marcavam
 sessão vazia/abertura de painel como edição. Isso não converte os dez overruns
 históricos em cumprimento de prazo nem conclui as pendências de hardware.
+
+Fechamento Alpha: correção Unicode do scanner acrescentou teste real; builds e
+CTest17/17 Debug/Release,625checks+2smoke por configuração aprovados. Instalador
+final validado em26checks e portátil em caminho acentuado com WAV real.
+Entrega de revisão: `build/releases/alpha-0.7-local-review`, fontes sem cache local,
+inventário/avisos e comprovante sanitizado. Instalação em revisão manual preservada.
+As pendências de estabilidade da etapa1 continuam abertas; não houve novo stress
+Alpha300s nem aceite público. Detalhes no relatório Alpha acima.

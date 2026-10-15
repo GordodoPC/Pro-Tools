@@ -237,3 +237,26 @@
   scanner corrigidoF5EDB3B6B9391B72E97037FEDBC09ABCA18FDA892DE1DB20C816951C93FA48F7.
 - Novo pacote em build/releases/alpha-0.7-review-final sera revalidado antes de
   informar caminhos definitivos; publicacao continua bloqueada para revisao local.
+
+## 2026-10-15 — entrega Alpha para revisão local
+
+- Binários90b4371 revalidados:26/26 verificações em
+  build/alpha07-install-review-final/installation-result.json. Portátil em pasta
+  com acento passou hashes/scanner VST3/masterização/WAV; confirmação Não do Setup
+  retornou1602. Artefato:build/alpha07-artifact-review-final/artifact-result.json.
+- Cache PowerShell já versionado foi detectado no ZIP de fontes e preservado
+  no repositório. c12ab4f restringe raízes do arquivo de fontes; ZIP corrigido
+  tem5.454 entradas, inclui JUCE/patches, exclui cache/.git/build/dados NOVA.
+- Pacote definitivo:build/releases/alpha-0.7-local-review. Binários copiados byte
+  a byte dos artefatos aprovados, fontes filtradas c12ab4f, VALIDATION.json
+  sanitizado e11 hashes SHA256 conferidos. Setup6.795.776bytes,
+  SHA256FFEAB60240C76D24F30777DC97B3D9DECAADBDD082D27448230CC3EDAC209460.
+- Alpha instalada fora do roteiro não foi removida: teste interrompeu antes
+  de tocar a instalação. Usuário confirmou revisão manual e pediu preservá-la.
+  Instalador intermediário final2 não foi novamente validado em instalação;
+  entrega usa os binários anteriores efetivamente aprovados, sem esse aceite falso.
+- Builds/CTest finais permanecem17/17 Debug40,52s/Release19,01s,625checks+2smoke;
+  alterações seguintes atingiram somente filtro de empacotamento e documentação.
+- Cena curta Master:81cb/max141,9µs/zerooverrun instalado;82cb/max92,7µs/zerooverrun
+  portátil. Não substitui stress300s: dez violações históricas permanecem pendentes,
+  assim como licença, aceite do usuário e outro computador. Nenhum push/upload.
