@@ -43,6 +43,8 @@ Copy-Item -LiteralPath $msi,(Join-Path $work 'native/NOVA-DAW-Alpha-0.7-Public-T
 Compress-Archive -Path (Join-Path $stage '*') -DestinationPath (Join-Path $artifacts 'NOVA-DAW-Alpha-0.7-Public-Test-x64-portable.zip') -CompressionLevel Optimal
 # Explicit relative allowlist: source files only, no .git, sessions, captured audio or user settings.
 $sourceList=@(& git ls-files --cached --others --exclude-standard);if($LASTEXITCODE -ne 0){throw 'Falha ao enumerar fontes NOVA.'}
+# A tracked file can still be a local runtime cache. Restrict archive roots too.
+$sourceList=@($sourceList|Where-Object {$_ -cmatch '^(\.gitignore|AGENTS\.md|CMakeLists\.txt|CMakePresets\.json|dependencies\.json|README\.md)$|^(Source|tests|cmake|scripts|patches|packaging|docs)/'})
 $juceFiles=@(& git -C external/JUCE ls-files);if($LASTEXITCODE -ne 0){throw 'Falha ao enumerar fontes JUCE.'}
 $sourceList+=@($juceFiles|ForEach-Object {'external/JUCE/'+$_})
 $list=Join-Path $work 'source-files.txt';[IO.File]::WriteAllLines($list,$sourceList,$utf8)
