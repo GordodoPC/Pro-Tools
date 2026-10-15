@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "Session/AutomationModel.h"
 #include "Midi/MidiRuntime.h"
 #include "Audio/AudioRecorder.h"
 #include <algorithm>
@@ -240,7 +241,7 @@ bool MainComponent::openSession(const juce::File& file) {
     advancedWindow.reset();closeRecording();closeMidiEditing();mixer.closeEditors();
     audio.editStructure([&] { ok = Session::load(file, audio.engine, error); });
     if (!ok) { showError(error); return false; }
-    editor.reset(); currentSession = file; dirty = false;for(int i=0;i<audio.engine.trackCount();++i)if(audio.engine.track(i).midiTrack&&audio.engine.track(i).midiInput.isNotEmpty()){juce::String midiError;audio.ensureMidiInput(audio.engine.track(i).midiInput,midiError);}refreshTracks(); return true;
+    editor.reset(); currentSession = file; dirty = false;lastAutomationRevision=audio.engine.automation->revision();for(int i=0;i<audio.engine.trackCount();++i)if(audio.engine.track(i).midiTrack&&audio.engine.track(i).midiInput.isNotEmpty()){juce::String midiError;audio.ensureMidiInput(audio.engine.track(i).midiInput,midiError);}refreshTracks(); return true;
 }
 void MainComponent::saveSession(bool saveAs) {
     auto save = [safe = juce::Component::SafePointer<MainComponent>(this)](const juce::File& file) {
@@ -248,7 +249,7 @@ void MainComponent::saveSession(bool saveAs) {
         juce::String error;
         safe->closeRecording();juce::String midiError;safe->audio.midiRecorder->stop(midiError);
         bool ok=false;safe->audio.editStructure([&]{ok=Session::save(file,safe->audio.engine,error);});
-        if (ok) { safe->currentSession = file; safe->dirty = false; }
+        if (ok) { safe->currentSession = file; safe->dirty = false;safe->lastAutomationRevision=safe->audio.engine.automation->revision(); }
         else safe->showError(error);
     };
     if (!saveAs && currentSession != juce::File{}) { save(currentSession); return; }
@@ -283,7 +284,7 @@ void MainComponent::menuItemSelected(int id, int) {
     if(id==40){addMidiTrack();return;}if(id==41){openMidiEditor();return;}if(id==42){audio.engine.metronomeEnabled=!audio.engine.metronomeEnabled.load();dirty=true;return;}
     if(id==43){juce::String error;const bool ok=audio.midiRecorder->isActive()?audio.midiRecorder->stop(error):audio.midiRecorder->start((currentSession==juce::File{}?juce::File(NOVA_PROJECT_ROOT):currentSession.getParentDirectory()).getChildFile("Recordings/MIDI"),error);if(!ok)showError(error);dirty=true;refreshEdited();return;}
     if (id >=20 && id<=27) { editCommand(id); return; }
-    if (id == 1) confirmReplacement([this] { advancedWindow.reset();closeRecording();closeMidiEditing();mixer.closeEditors(); audio.editStructure([this] { audio.engine.clear(); }); editor.reset(); currentSession = {}; dirty = false; refreshTracks(); });
+    if (id == 1) confirmReplacement([this] { advancedWindow.reset();closeRecording();closeMidiEditing();mixer.closeEditors(); audio.editStructure([this] { audio.engine.clear(); }); editor.reset(); currentSession = {}; dirty = false;lastAutomationRevision=audio.engine.automation->revision(); refreshTracks(); });
     if (id == 2) chooseOpen(); if (id == 3) saveSession(false); if (id == 4) saveSession(true); if (id == 5) chooseImport();
     if (id == 6) { if (audio.engine.isPlaying()) pauseButton.onClick(); else playButton.onClick(); }
     if (id == 7) stopButton.onClick(); if (id == 8) switchView(false); if (id == 9) switchView(true); if (id == 10) audioButton.onClick();
@@ -413,6 +414,7 @@ bool MainComponent::validateEditor() {
 }
 void MainComponent::timerCallback() {
     audio.serviceMaintenance();
+    if(audio.engine.automation->revision()!=lastAutomationRevision){lastAutomationRevision=audio.engine.automation->revision();dirty=true;}
     if(validationAdvanced){advancedUiValidation();return;}
     if(validationRecording){recordingUiValidation();return;}
     if(validationMidi){midiUiValidation();return;}

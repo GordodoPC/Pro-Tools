@@ -70,7 +70,7 @@ private:
 };
 
 enum class AutomationMode { off, read, write, touch, latch };
-struct AutomationPoint { double time = 0; float value = 0; };
+struct AutomationPoint { double time = 0; float value = 0; int curve=0; }; // 0 linear, 1 hold, 2 smoothstep
 struct AutomationLane {
     // -1 volume, -2 pan, >=0 insert index; parameter is the normalized VST index/native value.
     int target = -1, parameter = 0;

@@ -15,6 +15,7 @@ struct MidiIO;
 class MidiPort;
 class MidiRecorder;
 class AudioRecorder;
+class AutomationModel;
 struct Peak { float low = 0, high = 0; };
 struct Clip {
     juce::File source;
@@ -70,11 +71,15 @@ struct Track {
     std::array<std::unique_ptr<MixProcessor>, 4> inserts;
     AutomationMode automationMode = AutomationMode::off;
     std::vector<AutomationLane> automation;
+    std::atomic<uint64_t> automationOverrideMask{0};
+    bool readsAutomation(const AutomationLane& lane)const {return automationMode!=AutomationMode::off&&automationMode!=AutomationMode::write&&!(automationOverrideMask.load(std::memory_order_relaxed)&(uint64_t(1)<<size_t(&lane-automation.data())));}
 };
 
 class AudioEngine final : public juce::AudioIODeviceCallback, private juce::AudioPlayHead {
 public:
     AudioEngine();
+    std::unique_ptr<AutomationModel> automation;
+    void finishAutomation();
     ~AudioEngine() override;
     // Mutations have one control-thread owner. Render uses a single CAS and never waits.
     // The guard waits for an existing render to finish on the control thread only.
@@ -243,6 +248,7 @@ public:
     template<class F> void editStructure(F&& edit) {
         const bool resume = engine.isPlaying();
         engine.pause();
+        engine.finishAutomation();
         AudioEngine::MutationGuard mutation(engine);
         devices.removeAudioCallback(&engine);
         try { edit(); engine.prepareProcessors(); } catch (...) { devices.addAudioCallback(&engine); throw; }

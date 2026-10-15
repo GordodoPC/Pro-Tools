@@ -214,6 +214,7 @@ float AutomationLane::evaluate(double time,float fallback)const noexcept {
     if(points.empty())return fallback;if(time<=points.front().time)return points.front().value;
     auto next=std::upper_bound(points.begin(),points.end(),time,[](double t,const auto& p){return t<p.time;});
     if(next==points.end())return points.back().value;const auto& a=*(next-1);const auto& b=*next;
-    return a.value+static_cast<float>((time-a.time)/(b.time-a.time))*(b.value-a.value);
+    double fraction=(time-a.time)/(b.time-a.time);if(a.curve==1)fraction=0;else if(a.curve==2)fraction=fraction*fraction*(3-2*fraction);
+    return a.value+static_cast<float>(fraction)*(b.value-a.value);
 }
 }

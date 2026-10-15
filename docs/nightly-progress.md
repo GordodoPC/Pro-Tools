@@ -136,3 +136,15 @@
 - Callback Realtek medido nas UIs Edit/Mix e MIDI das duas builds: zero overrun;
   Release max274,6/127,7us, Debug3332,5/999,9us. Cenas menores, sem certificação
   de carga máxima. CTest final Debug12/12 31,16s; Release12/12 17,12s.
+
+## 2026-10-15 — Fase 7, automação avançada
+
+- Etapa1 no commit9ff7c27, preservando os dois commits anteriores e os prazos.
+- Read/Write/Touch/Latch, volume/pan/parâmetros, curvas gráficas/textuais,
+  histórico próprio limitado e sessão v7 compatível implementados.
+- Captura UI30Hz fora do callback; máscaras atômicas no render; 64 lanes/faixa,
+  4096 pontos/lane e65536 pendentes. Limites/overflow em phase7-report.md.
+- AdvancedAutomation23 checks aprovados em Debug/Release, incluindo VST3 real.
+  Regressão Debug13/13 passou; Release em execução neste registro intermediário.
+- Fechamento: Debug13/13 40,61s e Release13/13 22,95s, 539 checks + dois smoke;
+  UI Edit/Mix/automação nas duas builds passou em build/phase7-automation-ui-*.

@@ -1,6 +1,7 @@
 #include "AudioEngine.h"
 #include "AudioRecorder.h"
 #include "RegionAudio.h"
+#include "Session/AutomationModel.h"
 #include "Midi/MidiIO.h"
 #include "Midi/MidiRuntime.h"
 #include <algorithm>
@@ -71,7 +72,7 @@ bool AudioEngine::addSharedClip(std::shared_ptr<Clip> clip, juce::String& error)
         error = "Limite: 64 faixas e 512 MiB de audio decodificado por sessao."; return false;
     }
     auto& t = tracks[static_cast<size_t>(count++)];
-    t.recordArm=false;t.monitorInput=false;t.monitorPreference=false;t.recordGain=1;t.inputPeak=0;t.recordInputLeft=0;t.recordInputRight=1;t.recordStereo=false;t.takes.clear();t.activeTake=0;t.auxiliary=false;t.midiTrack=false;t.midiClips.clear();t.midiEvents.clear();t.instrument.reset();t.midiInput.clear();t.midiArm=false;t.monoBus=false;t.outputTarget=-1;t.inputGain=1;t.rms=0;t.clipped=false;t.automation.clear();t.automationMode=AutomationMode::off;
+    t.recordArm=false;t.monitorInput=false;t.monitorPreference=false;t.recordGain=1;t.inputPeak=0;t.recordInputLeft=0;t.recordInputRight=1;t.recordStereo=false;t.takes.clear();t.activeTake=0;t.auxiliary=false;t.midiTrack=false;t.midiClips.clear();t.midiEvents.clear();t.instrument.reset();t.midiInput.clear();t.midiArm=false;t.monoBus=false;t.outputTarget=-1;t.inputGain=1;t.rms=0;t.clipped=false;t.automation.clear();t.automationOverrideMask=0;t.automationMode=AutomationMode::off;
     for(auto& p:t.inserts)p.reset();for(auto& send:t.sends){send.target=-1;send.gain=0;send.preFader=false;}
     t.clip = std::move(clip); t.gain = 1; t.pan = 0; t.mute = false; t.solo = false; t.peak = 0;
     t.name = t.clip->name; t.height = 140; t.outputMode = 0;
@@ -81,9 +82,9 @@ bool AudioEngine::addSharedClip(std::shared_ptr<Clip> clip, juce::String& error)
     if(!rebuildGraph(error)){--count;bytes-=clipBytes;t.regions.clear();t.clip.reset();return false;}return true;
 }
 void AudioEngine::clear() {
-    MutationGuard mutation(*this);for(auto& route:midiIO->routes)route=0;++midiIO->generation;midiRecording=false;
+    MutationGuard mutation(*this);for(auto& route:midiIO->routes)route=0;++midiIO->generation;midiRecording=false;if(automation)automation->reset();
     stop();stopPreview();recordingExtent=0;audioRecording=false;
-    for (auto& t : tracks) { t.regions.clear(); t.clip.reset();for(auto& p:t.inserts)p.reset();t.instrument.reset();t.midiClips.clear();t.midiEvents.clear();t.midiTrack=false;t.midiArm=false;t.recordArm=false;t.monitorInput=false;t.takes.clear();t.activeTake=0;t.automation.clear(); }
+    for (auto& t : tracks) { t.regions.clear(); t.clip.reset();for(auto& p:t.inserts)p.reset();t.instrument.reset();t.midiClips.clear();t.midiEvents.clear();t.midiTrack=false;t.midiArm=false;t.recordArm=false;t.monitorInput=false;t.takes.clear();t.activeTake=0;t.automation.clear();t.automationOverrideMask=0; }
     for(auto& p:masterInserts)p.reset();masterMute=false;masterClipped=false;masterPeak=masterRms=0;smoothingInitialized=false;
     count = 0; bytes = 0; recordingOptions={};masterGain = 1;compensation={};visibleLatency=0;pdcReady=true;configurationError.clear();
     loopEnabled = false; loopStart = 0; loopEnd = 0; bpm = 120; beatsPerBar = beatUnit = 4;
@@ -118,8 +119,10 @@ AudioEngine::MutationGuard::MutationGuard(AudioEngine& e):engine(e){
 }
 AudioEngine::MutationGuard::~MutationGuard(){if(--engine.mutationDepth==0)engine.processingGate.fetch_and(~2u,std::memory_order_release);}
 AudioEngine::~AudioEngine()=default;
+void AudioEngine::finishAutomation(){automation->finishAll();}
 void AudioEngine::pause(){previewPlaying=false;playing=false;midiRecording=false;audioRecording=false;midiIO->panic=true;}
 AudioEngine::AudioEngine() {
+    automation=std::make_unique<AutomationModel>(*this);
     midiIO=std::make_unique<MidiIO>();
     for(auto& buffer:channelBuffers)buffer.setSize(2,mixBlockSize);
     masterBuffer.setSize(2,mixBlockSize);for(auto& buffer:scheduledMidi)buffer.ensureSize(8192);midiSpan.ensureSize(8192);lastMidiTime.fill(-1);setSmoothingTime(smoothingTime);
@@ -273,7 +276,7 @@ void AudioEngine::renderBlock(float* const* output,int channels,int offset,int f
         if(t.midiTrack){scheduleTrackMidi(i,frames,offset,active);if(t.instrument)t.instrument->process(buffer,frames,&scheduledMidi[i]);}
         std::array<float,mixBlockSize> audibility{};for(int s=0;s<frames;++s)audibility[s]=smoothAudible[i].getNextValue();
         for(int s=0;s<frames;++s){const double time=timeAt(s);float pan=t.pan.load();
-            if(t.automationMode==AutomationMode::read)for(const auto& lane:t.automation){if(lane.target==-2)pan=lane.evaluate(automationTime(s,compensation.inputLatency[i]+(t.instrument?t.instrument->latencySamples():0)),pan);}
+            for(const auto& lane:t.automation){if(t.readsAutomation(lane)&&lane.target==-2)pan=lane.evaluate(automationTime(s,compensation.inputLatency[i]+(t.instrument?t.instrument->latencySamples():0)),pan);}
             smoothPan[i].setTargetValue(std::clamp(pan,-1.0f,1.0f));
             const float p=smoothPan[i].getNextValue();const float in=smoothInput[i].getNextValue();
             if(active&&!t.auxiliary&&!t.midiTrack)for(const auto& region:t.regions){
@@ -291,19 +294,19 @@ void AudioEngine::renderBlock(float* const* output,int channels,int offset,int f
             for(int c=0;c<2;++c)buffer.setSample(c,s,buffer.getSample(c,s)*in);
         }
         // Parameter Read uses 16-sample segments; volume/pan interpolate each sample.
-        const bool parameterAutomation=t.automationMode==AutomationMode::read && std::any_of(t.automation.begin(),t.automation.end(),[](const auto& lane){return lane.target>=0;});
+        const bool parameterAutomation=t.automationMode!=AutomationMode::off && t.automationMode!=AutomationMode::write && std::any_of(t.automation.begin(),t.automation.end(),[](const auto& lane){return lane.target>=0;});
         if(parameterAutomation){
             for(int s=0;s<frames;s+=16){int arrival=compensation.inputLatency[i]+(t.instrument?t.instrument->latencySamples():0);
                 float* ptr[]{buffer.getWritePointer(0)+s,buffer.getWritePointer(1)+s};juce::AudioBuffer<float> segment(ptr,2,std::min(16,frames-s));
                 for(int slot=0;slot<4;++slot)if(auto& insert=t.inserts[slot]){
-                    for(const auto& lane:t.automation)if(lane.target==slot)insert->setParameter(lane.parameter,lane.evaluate(automationTime(s,arrival),insert->parameter(lane.parameter)));
+                    for(const auto& lane:t.automation)if(t.readsAutomation(lane)&&lane.target==slot)insert->setParameter(lane.parameter,lane.evaluate(automationTime(s,arrival),insert->parameter(lane.parameter)));
                     insert->process(segment,segment.getNumSamples());arrival+=insert->latencySamples();}}
         }else for(auto& insert:t.inserts)if(insert)insert->process(buffer,frames);
         for(int j=0;j<2;++j){const auto& send=t.sends[j];smoothSend[i][j].setTargetValue(std::clamp(send.gain.load(),0.0f,2.0f));
             const int target=compensation.targets[i][j+1];if(target>=0 && send.preFader)for(int s=0;s<frames;++s){const float g=smoothSend[i][j].getNextValue()*audibility[s];
                 const auto values=compensation.edges[i][j+1].process(buffer.getSample(0,s)*g,buffer.getSample(1,s)*g);for(int c=0;c<2;++c)channelBuffers[target].addSample(c,s,values[c]);}}
         // Smooth fader after inserts/pre sends. Targets are re-evaluated at the sample's transport position.
-        for(int s=0;s<frames;++s){float g=t.gain.load();if(t.automationMode==AutomationMode::read)for(const auto& lane:t.automation)if(lane.target==-1)g=lane.evaluate(automationTime(s,compensation.outputLatency[i]),g);
+        for(int s=0;s<frames;++s){float g=t.gain.load();for(const auto& lane:t.automation)if(t.readsAutomation(lane)&&lane.target==-1)g=lane.evaluate(automationTime(s,compensation.outputLatency[i]),g);
             smoothGain[i].setTargetValue(std::clamp(g,0.0f,2.0f));const float f=smoothGain[i].getNextValue();
             for(int c=0;c<2;++c){const float v=buffer.getSample(c,s)*f*audibility[s];buffer.setSample(c,s,v);peaks[i]=std::max(peaks[i],std::abs(v));squares[i]+=v*v;}}
         for(int j=0;j<2;++j){const auto& send=t.sends[j];const int target=compensation.targets[i][j+1];if(target>=0 && !send.preFader)for(int s=0;s<frames;++s){const float g=smoothSend[i][j].getNextValue();
@@ -437,7 +440,7 @@ juce::var AudioEngine::deviceCallbackTiming()const {
 void AudioEngine::audioDeviceAboutToStart(juce::AudioIODevice* device) { monitoringAllowed=false;requestedDeviceRate.store(device->getCurrentSampleRate()); }
 void AudioEngine::audioDeviceStopped() { monitoringAllowed=false;pause(); }
 AudioRuntime::AudioRuntime() { audioRecorder=std::make_unique<AudioRecorder>(engine);engine.attachRecorder(audioRecorder.get());midiRecorder=std::make_unique<MidiRecorder>(engine);initialError = devices.initialiseWithDefaultDevices(0, 2);if(auto* device=devices.getCurrentAudioDevice())engine.setOutputRate(device->getCurrentSampleRate()); devices.addAudioCallback(&engine); }
-void AudioRuntime::serviceMaintenance(){if(!engine.monitoringAllowed)for(int i=0;i<engine.trackCount();++i)engine.track(i).monitorInput=false;audioRecorder->service();midiRecorder->service();if(engine.needsMaintenance())editStructure([this]{if(auto* device=devices.getCurrentAudioDevice())engine.setOutputRate(device->getCurrentSampleRate());else engine.prepareProcessors();});}
+void AudioRuntime::serviceMaintenance(){if(!engine.monitoringAllowed)for(int i=0;i<engine.trackCount();++i)engine.track(i).monitorInput=false;audioRecorder->service();midiRecorder->service();engine.automation->service();if(engine.needsMaintenance())editStructure([this]{if(auto* device=devices.getCurrentAudioDevice())engine.setOutputRate(device->getCurrentSampleRate());else engine.prepareProcessors();});}
 AudioRuntime::~AudioRuntime() { midiPorts.clear();devices.removeAudioCallback(&engine);juce::String error;audioRecorder->stop(error);midiRecorder->stop(error);devices.closeAudioDevice(); }
 bool AudioRuntime::ensureMidiInput(const juce::String& identifier,juce::String& error){
     if(identifier.isEmpty())return true;for(const auto& port:midiPorts)if(port->identifier==identifier)return true;

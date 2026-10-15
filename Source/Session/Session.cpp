@@ -1,4 +1,5 @@
 #include "Session.h"
+#include "AutomationModel.h"
 #include <cmath>
 #include <map>
 #include <set>
@@ -17,15 +18,15 @@ juce::var mixState(const Track& t){auto o=std::make_unique<juce::DynamicObject>(
     for(const auto& send:t.sends){auto v=std::make_unique<juce::DynamicObject>();v->setProperty("target",send.target);v->setProperty("preFader",send.preFader);v->setProperty("gain",send.gain.load());sends.add(juce::var(v.release()));}
     o->setProperty("sends",sends);o->setProperty("automationMode",int(t.automationMode));juce::Array<juce::var> lanes;
     for(const auto& lane:t.automation){auto l=std::make_unique<juce::DynamicObject>();l->setProperty("target",lane.target);l->setProperty("parameter",lane.parameter);juce::Array<juce::var> points;
-        for(const auto& point:lane.points){auto v=std::make_unique<juce::DynamicObject>();v->setProperty("time",point.time);v->setProperty("value",point.value);points.add(juce::var(v.release()));}
+        for(const auto& point:lane.points){auto v=std::make_unique<juce::DynamicObject>();v->setProperty("time",point.time);v->setProperty("value",point.value);v->setProperty("curve",point.curve);points.add(juce::var(v.release()));}
         l->setProperty("points",points);lanes.add(juce::var(l.release()));}
     o->setProperty("automation",lanes);return juce::var(o.release());
 }
 bool readMix(const juce::var& v,Track& t,double rate,juce::String& error){
     if(!v.isObject() || !numeric(v["inputGain"]) || !std::isfinite(double(v["inputGain"])) || double(v["inputGain"])<0 || double(v["inputGain"])>16
         || !v["outputTarget"].isInt() || !v["sends"].isArray() || v["sends"].getArray()->size()!=2
-        || !v["automationMode"].isInt() || int(v["automationMode"])<0 || int(v["automationMode"])>1
-        || !v["automation"].isArray() || v["automation"].getArray()->size()>64){error="Mixagem/automacao invalida; apenas Off e Read suportados.";return false;}
+        || !v["automationMode"].isInt() || int(v["automationMode"])<0 || int(v["automationMode"])>4
+        || !v["automation"].isArray() || v["automation"].getArray()->size()>64){error="Mixagem/automacao invalida; modo/limites invalidos.";return false;}
     t.inputGain=float(v["inputGain"]);t.outputTarget=int(v["outputTarget"]);t.automationMode=static_cast<AutomationMode>(int(v["automationMode"]));
     if(!readInserts(v["inserts"],t.inserts,rate,error))return false;
     for(int i=0;i<2;++i){const auto& send=v["sends"].getArray()->getReference(i);
@@ -43,15 +44,15 @@ bool readMix(const juce::var& v,Track& t,double rate,juce::String& error){
         double previous=-1;
         for(const auto& point:*item["points"].getArray()){double time=double(point["time"]);float value=float(point["value"]);
             if(!numeric(point["time"]) || !numeric(point["value"]) || !std::isfinite(time) || !std::isfinite(value) || time<0 || time>86400 || time<=previous || value<low || value>high){error="Ponto de automacao invalido.";return false;}
-            previous=time;lane.points.push_back({time,value});}
+            const int curve=point["curve"].isVoid()?0:int(point["curve"]);if(!point["curve"].isVoid()&&(!point["curve"].isInt()||curve<0||curve>2)){error="Curva de automacao invalida.";return false;}previous=time;lane.points.push_back({time,value,curve});}
         t.automation.push_back(std::move(lane));
     }
     return true;
 }
 }
 bool Session::save(const juce::File& file, const AudioEngine& engine, juce::String& error) {
-    auto root = std::make_unique<juce::DynamicObject>();
-    root->setProperty("format", "nova-daw-session"); root->setProperty("version", 6);root->setProperty("midiPpq",midiPpq);root->setProperty("metronome",engine.metronomeEnabled.load());
+    engine.automation->finishAll();auto root = std::make_unique<juce::DynamicObject>();
+    root->setProperty("format", "nova-daw-session"); root->setProperty("version", 7);root->setProperty("midiPpq",midiPpq);root->setProperty("metronome",engine.metronomeEnabled.load());
     const auto& record=engine.recordingOptions;auto settings=std::make_unique<juce::DynamicObject>();settings->setProperty("punch",record.punch);settings->setProperty("loop",record.loop);settings->setProperty("punchIn",record.punchIn);settings->setProperty("punchOut",record.punchOut);settings->setProperty("preRoll",record.preRoll);settings->setProperty("postRoll",record.postRoll);settings->setProperty("loopStart",record.loopStart);settings->setProperty("loopEnd",record.loopEnd);root->setProperty("recording",juce::var(settings.release()));
     root->setProperty("masterGain", engine.masterGain.load());
     root->setProperty("masterMute",engine.masterMute.load());root->setProperty("masterInserts",insertState(engine.masterInserts));
@@ -94,7 +95,7 @@ bool Session::load(const juce::File& file, AudioEngine& engine, juce::String& er
     if(file.getSize()>64LL*1024*1024){error="Sessao excede o limite de 64 MiB de metadados.";return false;}
     juce::var data;
     if (juce::JSON::parse(file.loadFileAsString(), data).failed() || !data.isObject()
-        || data["format"].toString() != "nova-daw-session" || !data["version"].isInt() || (int(data["version"])<1 || int(data["version"])>6)
+        || data["format"].toString() != "nova-daw-session" || !data["version"].isInt() || (int(data["version"])<1 || int(data["version"])>7)
         || !data["tracks"].isArray() || !numeric(data["masterGain"])) { error = "Sessao invalida ou versao nao suportada."; return false; }
     auto* rows = data["tracks"].getArray();
     if (rows->size() > AudioEngine::maxTracks) { error = "Sessao excede 64 faixas."; return false; }

@@ -301,3 +301,13 @@ registra P50/P95/P99, detalhes de cada overrun, ciclos da thread, atrasos para
 acordar e contadores de silêncio por mutação/manutenção. Também mede buffers
 conhecidos, alocações C++ vivas e memória após limpar a sessão. Ciclos não são
 convertidos em tempo; probes não cobrem todos os alocadores de DLLs.
+
+Em MIX, **Auto** abre modos Off/Read/Write/Touch/Latch. Crie uma lane com
+**Aplicar lane**; arraste pontos na curva e use Shift-clique para excluir.
+Linear/Hold/Smooth escolhem interpolação. O fader/pan MIX, editores de DSP nativo
+e o slider de destino do painel gravam os gestos. Write grava as lanes;
+Touch volta ao Read ao soltar e Latch mantém até Stop. Undo/Redo de automação
+estão no painel, após parar o transporte. Salvar fecha a captura pendente.
+Captura tem resolução de UI (30 Hz); Read continua calculado no render.
+O slider do painel controla parâmetros VST3 reais; editores de terceiros
+arbitrários ainda não enviam gestos ao gravador de automação.

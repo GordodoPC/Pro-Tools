@@ -69,6 +69,7 @@ private:
     bool validationMidi=false,validationMidiBindings=false,validationMidiAudio=false;
     juce::File currentSession;
     bool mixVisible = false, dirty = false;
+    uint64_t lastAutomationRevision=0;
     void timerCallback() override;
     void switchView(bool);
     void chooseImport();

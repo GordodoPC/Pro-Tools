@@ -109,6 +109,29 @@ Release12/12 (17,12s), 516 checks mais dois smoke por configuração.
 
 ## Etapas funcionais
 
-Automação avançada, grupos/sidechain, masterização/exportação, painéis e testes
-específicos ainda pendentes neste ponto do ciclo. Nenhum deles é declarado
-concluído por existir apenas modelo, enumeração ou controle visual.
+### Etapa 2 — automação avançada
+
+Implementados Read/Write/Touch/Latch por faixa, volume/pan/parâmetros de inserts,
+curvas lineares/hold/smoothstep, editor gráfico/textual, histórico próprio de
+32 operações/64 MiB e sessão v7 compatível com v1–6. Read conserva avaliação por
+sample para volume/pan e segmentos de 16 samples para parâmetros, com PDC.
+
+Captura na thread de controle a 30 Hz, sem alocar/esperar/modificar vetores no
+render. Máscara atômica de 64 lanes identifica overrides; Touch devolve ao Read
+ao soltar, Latch permanece até parar, Write grava lanes configuradas mesmo sem
+gesto contínuo. Salvar/edições estruturais fecham capturas antes da troca.
+O histórico de regiões continua independente, preservando Undo/Redo anteriores.
+
+Limites: 64 lanes/faixa, 4096 pontos/lane, até 65536 pontos pendentes; overflow
+contado, captura interrompida/Read restaurado. Se a fusão ultrapassa 4096 pontos,
+a lane original é mantida e a nova captura daquela lane não é adotada.
+Não é gravação sample-accurate de gestos; playback mantém os offsets existentes.
+VST3 tem captura pelo slider do painel de automação; gestos de editores externos
+arbitrários ainda não estão conectados a listeners de automação do host.
+
+23 verificações AdvancedAutomation passaram em Debug/Release: áudio de Touch/
+Latch, Write, retorno ao Read, Undo/Redo, curvas, persistência e VST3 real próprio.
+Regressão completa: Debug **13/13 (40,61 s)**, Release **13/13 (22,95 s)**,
+539 verificações e dois smoke tests por build. UI Edit/Mix com editor/parâmetros,
+sends/automação/Master passou em `build/phase7-automation-ui-{debug,release}`.
+Grupos/sidechain e masterização são as próximas etapas.
