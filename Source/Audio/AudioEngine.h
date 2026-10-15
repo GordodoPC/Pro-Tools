@@ -27,6 +27,8 @@ struct Clip {
 };
 enum class FadeCurve { linear, exponential, equalPower };
 struct Track {
+    int vcaGroup=-1,channelGroup=-1,sidechainSource=-1;
+    std::atomic<bool> soloSafe{false};
     bool auxiliary = false;
     bool midiTrack = false;
     std::vector<MidiClip> midiClips;
@@ -66,7 +68,7 @@ struct Track {
     std::atomic<float> inputGain{1}, rms{0};
     std::atomic<bool> clipped{false};
     int outputTarget = -1; // -1 Master, otherwise an auxiliary channel
-    struct Send { int target = -1; bool preFader = false; std::atomic<float> gain{0}; };
+    struct Send { int target = -1; bool preFader = false; std::atomic<float> gain{0},pan{0},width{1};std::atomic<bool> mute{false}; };
     std::array<Send, 2> sends;
     std::array<std::unique_ptr<MixProcessor>, 4> inserts;
     AutomationMode automationMode = AutomationMode::off;
@@ -77,6 +79,9 @@ struct Track {
 
 class AudioEngine final : public juce::AudioIODeviceCallback, private juce::AudioPlayHead {
 public:
+    struct Group {juce::String name;std::atomic<float> gain{1};std::atomic<bool> mute{false},solo{false};};
+    std::array<Group,8> vcaGroups,channelGroups;
+    bool setSidechain(int track,int source,juce::String&);
     AudioEngine();
     std::unique_ptr<AutomationModel> automation;
     void finishAutomation();
@@ -194,6 +199,14 @@ private:
     std::atomic<double> outputRate{44100}, requestedDeviceRate{44100};
     uint64_t nextRegionId = 1;
     std::array<juce::AudioBuffer<float>, maxTracks> channelBuffers;
+    struct MixExtensions {
+        std::array<juce::AudioBuffer<float>,maxTracks> detectorTaps;
+        juce::AudioBuffer<float> detectorBuffer;
+        std::array<juce::AudioBuffer<float>,4> detectorStages;
+        std::array<juce::SmoothedValue<float>,maxTracks> smoothGroupGain;
+        std::array<std::array<juce::SmoothedValue<float>,2>,maxTracks> smoothSendPan,smoothSendWidth;
+    };
+    std::unique_ptr<MixExtensions> extended;
     juce::AudioBuffer<float> masterBuffer;
     std::array<int, maxTracks> processingOrder{};
     std::array<juce::SmoothedValue<float>, maxTracks> smoothGain, smoothPan, smoothInput;

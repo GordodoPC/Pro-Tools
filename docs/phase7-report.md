@@ -135,3 +135,35 @@ Regressão completa: Debug **13/13 (40,61 s)**, Release **13/13 (22,95 s)**,
 539 verificações e dois smoke tests por build. UI Edit/Mix com editor/parâmetros,
 sends/automação/Master passou em `build/phase7-automation-ui-{debug,release}`.
 Grupos/sidechain e masterização são as próximas etapas.
+
+### Etapa 3 — mixagem profissional
+
+Implementados oito VCAs e oito grupos de canais, nomes/ganho/mute, solo de grupo,
+membership independente, Solo Safe e suavização de ganho. VCA atua depois do
+fader; sends pré-fader conservam seu nível. Sends incluem pan, width 0..2 e
+mute com smoothing. Configurações/grupos persistem na sessão v7.
+
+Sidechain externo funciona no NOVA Compressor/Gate, a partir do tap pós-fader
+da fonte, independente de sua exclusão por solo. Grafo inclui dependência de
+key, rejeita ciclos e alinha fonte principal/detector e cada estágio anterior
+de insert. Fontes/grupos mutados não são promovidos a áudio audível por Solo Safe.
+VST3 com buses auxiliares de sidechain e instrumento MIDI como destino de key
+não estão habilitados; o painel identifica os DSPs nativos suportados.
+
+Preparação multicanal: ChannelLayout/ChannelMatrix validam mono/stereo/5.1/7.1 e
+executam matriz de roteamento/downmix. Playback, buses/plugin IO e dispositivo
+continuam stereo; não se anuncia saída surround operacional por existir a API.
+
+19 verificações ProfessionalMixing passaram: sinais reais em VCA/grupos/sends,
+Solo Safe, estado, ciclo e gate com key VST3 de31 samples + insert anterior de17,
+abertura exata no sample148 para impulso na fonte100, inclusive Read segmentado.
+Regressão final: Debug **14/14 (33,01s)** e Release **14/14 (18,46s)**, 558 checks
+mais dois smoke por build. UI/curva/Undo/grupos passou em
+`build/phase7-mix-final-ui-{debug,release}`.
+
+Regressão Debug encontrada e corrigida: estruturas grandes inline aumentaram a
+pilha de testes com vários engines locais; duas execuções falharam antes de
+executar suas verificações. Estado adicional passou a ownership no heap,
+prealocado no controle, e os mesmos testes passaram sem aumentar sua pilha.
+Uma asserção inicial usou a sobrecarga errada de getMagnitude; corrigida para
+canal/start/count, mantendo a exigência numérica do gate no sample esperado.

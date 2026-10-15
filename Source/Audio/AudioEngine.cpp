@@ -72,8 +72,8 @@ bool AudioEngine::addSharedClip(std::shared_ptr<Clip> clip, juce::String& error)
         error = "Limite: 64 faixas e 512 MiB de audio decodificado por sessao."; return false;
     }
     auto& t = tracks[static_cast<size_t>(count++)];
-    t.recordArm=false;t.monitorInput=false;t.monitorPreference=false;t.recordGain=1;t.inputPeak=0;t.recordInputLeft=0;t.recordInputRight=1;t.recordStereo=false;t.takes.clear();t.activeTake=0;t.auxiliary=false;t.midiTrack=false;t.midiClips.clear();t.midiEvents.clear();t.instrument.reset();t.midiInput.clear();t.midiArm=false;t.monoBus=false;t.outputTarget=-1;t.inputGain=1;t.rms=0;t.clipped=false;t.automation.clear();t.automationOverrideMask=0;t.automationMode=AutomationMode::off;
-    for(auto& p:t.inserts)p.reset();for(auto& send:t.sends){send.target=-1;send.gain=0;send.preFader=false;}
+    t.vcaGroup=t.channelGroup=t.sidechainSource=-1;t.soloSafe=false;t.recordArm=false;t.monitorInput=false;t.monitorPreference=false;t.recordGain=1;t.inputPeak=0;t.recordInputLeft=0;t.recordInputRight=1;t.recordStereo=false;t.takes.clear();t.activeTake=0;t.auxiliary=false;t.midiTrack=false;t.midiClips.clear();t.midiEvents.clear();t.instrument.reset();t.midiInput.clear();t.midiArm=false;t.monoBus=false;t.outputTarget=-1;t.inputGain=1;t.rms=0;t.clipped=false;t.automation.clear();t.automationOverrideMask=0;t.automationMode=AutomationMode::off;
+    for(auto& p:t.inserts)p.reset();for(auto& send:t.sends){send.target=-1;send.gain=0;send.pan=0;send.width=1;send.mute=false;send.preFader=false;}
     t.clip = std::move(clip); t.gain = 1; t.pan = 0; t.mute = false; t.solo = false; t.peak = 0;
     t.name = t.clip->name; t.height = 140; t.outputMode = 0;
     t.colour = juce::Colour::fromHSV(std::fmod(0.47f + (count - 1) * 0.13f, 1.0f), 0.5f, 0.88f, 1.0f).getARGB();
@@ -84,10 +84,10 @@ bool AudioEngine::addSharedClip(std::shared_ptr<Clip> clip, juce::String& error)
 void AudioEngine::clear() {
     MutationGuard mutation(*this);for(auto& route:midiIO->routes)route=0;++midiIO->generation;midiRecording=false;if(automation)automation->reset();
     stop();stopPreview();recordingExtent=0;audioRecording=false;
-    for (auto& t : tracks) { t.regions.clear(); t.clip.reset();for(auto& p:t.inserts)p.reset();t.instrument.reset();t.midiClips.clear();t.midiEvents.clear();t.midiTrack=false;t.midiArm=false;t.recordArm=false;t.monitorInput=false;t.takes.clear();t.activeTake=0;t.automation.clear();t.automationOverrideMask=0; }
+    for (auto& t : tracks) { t.regions.clear(); t.clip.reset();for(auto& p:t.inserts)p.reset();t.instrument.reset();t.midiClips.clear();t.midiEvents.clear();t.midiTrack=false;t.midiArm=false;t.vcaGroup=t.channelGroup=t.sidechainSource=-1;t.soloSafe=false;t.recordArm=false;t.monitorInput=false;t.takes.clear();t.activeTake=0;t.automation.clear();t.automationOverrideMask=0; }
     for(auto& p:masterInserts)p.reset();masterMute=false;masterClipped=false;masterPeak=masterRms=0;smoothingInitialized=false;
     count = 0; bytes = 0; recordingOptions={};masterGain = 1;compensation={};visibleLatency=0;pdcReady=true;configurationError.clear();
-    loopEnabled = false; loopStart = 0; loopEnd = 0; bpm = 120; beatsPerBar = beatUnit = 4;
+    for(int i=0;i<8;++i){vcaGroups[i].gain=1;vcaGroups[i].mute=false;vcaGroups[i].solo=false;vcaGroups[i].name="VCA "+juce::String(i+1);channelGroups[i].gain=1;channelGroups[i].mute=false;channelGroups[i].solo=false;channelGroups[i].name="Grupo "+juce::String(i+1);}loopEnabled = false; loopStart = 0; loopEnd = 0; bpm = 120; beatsPerBar = beatUnit = 4;
 }
 double AudioEngine::duration() const {
     double end = 0;
@@ -122,15 +122,16 @@ AudioEngine::~AudioEngine()=default;
 void AudioEngine::finishAutomation(){automation->finishAll();}
 void AudioEngine::pause(){previewPlaying=false;playing=false;midiRecording=false;audioRecording=false;midiIO->panic=true;}
 AudioEngine::AudioEngine() {
-    automation=std::make_unique<AutomationModel>(*this);
+    for(int i=0;i<8;++i){vcaGroups[i].name="VCA "+juce::String(i+1);channelGroups[i].name="Grupo "+juce::String(i+1);}
+    extended=std::make_unique<MixExtensions>();automation=std::make_unique<AutomationModel>(*this);
     midiIO=std::make_unique<MidiIO>();
-    for(auto& buffer:channelBuffers)buffer.setSize(2,mixBlockSize);
+    for(auto& buffer:channelBuffers)buffer.setSize(2,mixBlockSize);for(auto& buffer:extended->detectorTaps)buffer.setSize(2,mixBlockSize);extended->detectorBuffer.setSize(2,mixBlockSize);for(auto& buffer:extended->detectorStages)buffer.setSize(2,mixBlockSize);
     masterBuffer.setSize(2,mixBlockSize);for(auto& buffer:scheduledMidi)buffer.ensureSize(8192);midiSpan.ensureSize(8192);lastMidiTime.fill(-1);setSmoothingTime(smoothingTime);
 }
 void AudioEngine::setSmoothingTime(double seconds) {
     MutationGuard mutation(*this);
     smoothingTime=std::clamp(seconds,0.0,0.1);smoothingInitialized=false;
-    for(int i=0;i<maxTracks;++i){smoothGain[i].reset(outputRate,smoothingTime);smoothPan[i].reset(outputRate,smoothingTime);smoothInput[i].reset(outputRate,smoothingTime);smoothAudible[i].reset(outputRate,smoothingTime);for(auto& send:smoothSend[i])send.reset(outputRate,smoothingTime);}
+    for(int i=0;i<maxTracks;++i){smoothGain[i].reset(outputRate,smoothingTime);smoothPan[i].reset(outputRate,smoothingTime);smoothInput[i].reset(outputRate,smoothingTime);extended->smoothGroupGain[i].reset(outputRate,smoothingTime);smoothAudible[i].reset(outputRate,smoothingTime);for(auto& send:smoothSend[i])send.reset(outputRate,smoothingTime);for(auto& send:extended->smoothSendPan[i])send.reset(outputRate,smoothingTime);for(auto& send:extended->smoothSendWidth[i])send.reset(outputRate,smoothingTime);}
     smoothMaster.reset(outputRate,smoothingTime);smoothMasterAudible.reset(outputRate,smoothingTime);
 }
 void AudioEngine::setOutputRate(double rate) {
@@ -161,7 +162,7 @@ uint64_t AudioEngine::contentionDropouts()const {
 size_t AudioEngine::ownedBufferBytes()const {
     size_t total=size_t(bytes)+compensation.allocatedBytes+clickCompensation.bytes();
     for(const auto& buffer:channelBuffers)total+=size_t(buffer.getNumSamples())*buffer.getNumChannels()*sizeof(float);
-    total+=size_t(masterBuffer.getNumSamples())*masterBuffer.getNumChannels()*sizeof(float);
+    total+=size_t(masterBuffer.getNumSamples())*masterBuffer.getNumChannels()*sizeof(float);for(const auto& buffer:extended->detectorTaps)total+=size_t(buffer.getNumSamples())*buffer.getNumChannels()*sizeof(float);for(const auto& buffer:extended->detectorStages)total+=size_t(buffer.getNumSamples())*buffer.getNumChannels()*sizeof(float);total+=size_t(extended->detectorBuffer.getNumSamples())*extended->detectorBuffer.getNumChannels()*sizeof(float);
     for(int i=0;i<count;++i){if(track(i).instrument)total+=track(i).instrument->ownedBufferBytes();for(const auto& p:track(i).inserts)if(p)total+=p->ownedBufferBytes();}
     for(const auto& p:masterInserts)if(p)total+=p->ownedBufferBytes();return total;
 }
@@ -170,14 +171,14 @@ void AudioEngine::replaceSession(AudioEngine& other) {
     MutationGuard mutation(*this);
     clear();
     for(int i=0;i<other.count;++i){auto& src=other.track(i);auto& dst=track(i);
-        dst.clip=std::move(src.clip);dst.regions=std::move(src.regions);dst.name=src.name;dst.colour=src.colour;dst.height=src.height;
+        dst.vcaGroup=src.vcaGroup;dst.channelGroup=src.channelGroup;dst.sidechainSource=src.sidechainSource;dst.soloSafe=src.soloSafe.load();dst.clip=std::move(src.clip);dst.regions=std::move(src.regions);dst.name=src.name;dst.colour=src.colour;dst.height=src.height;
         dst.gain=src.gain.load();dst.pan=src.pan.load();dst.mute=src.mute.load();dst.solo=src.solo.load();dst.outputMode=src.outputMode.load();
         dst.inputGain=src.inputGain.load();dst.outputTarget=src.outputTarget;dst.auxiliary=src.auxiliary;dst.monoBus=src.monoBus;
         dst.midiTrack=src.midiTrack;dst.midiClips=std::move(src.midiClips);dst.midiEvents=std::move(src.midiEvents);dst.instrument=std::move(src.instrument);dst.midiInput=src.midiInput;dst.midiArm=src.midiArm.load();dst.recordArm=src.recordArm.load();dst.monitorInput=false;dst.monitorPreference=src.monitorPreference;dst.recordGain=src.recordGain.load();dst.recordInputLeft=src.recordInputLeft;dst.recordInputRight=src.recordInputRight;dst.recordStereo=src.recordStereo;dst.takes=std::move(src.takes);dst.activeTake=src.activeTake;
         dst.peak=dst.rms=0;dst.clipped=false;dst.inserts=std::move(src.inserts);dst.automation=std::move(src.automation);dst.automationMode=src.automationMode;
-        for(int j=0;j<2;++j){dst.sends[j].target=src.sends[j].target;dst.sends[j].preFader=src.sends[j].preFader;dst.sends[j].gain=src.sends[j].gain.load();}
+        for(int j=0;j<2;++j){dst.sends[j].pan=src.sends[j].pan.load();dst.sends[j].width=src.sends[j].width.load();dst.sends[j].mute=src.sends[j].mute.load();dst.sends[j].target=src.sends[j].target;dst.sends[j].preFader=src.sends[j].preFader;dst.sends[j].gain=src.sends[j].gain.load();}
     }
-    count=other.count;bytes=other.bytes;nextRegionId=other.nextRegionId;processingOrder=other.processingOrder;
+    for(int i=0;i<8;++i){vcaGroups[i].name=other.vcaGroups[i].name;vcaGroups[i].gain=other.vcaGroups[i].gain.load();vcaGroups[i].mute=other.vcaGroups[i].mute.load();channelGroups[i].name=other.channelGroups[i].name;channelGroups[i].gain=other.channelGroups[i].gain.load();channelGroups[i].mute=other.channelGroups[i].mute.load();channelGroups[i].solo=other.channelGroups[i].solo.load();}count=other.count;bytes=other.bytes;nextRegionId=other.nextRegionId;processingOrder=other.processingOrder;
     masterGain=other.masterGain.load();masterMute=other.masterMute.load();masterInserts=std::move(other.masterInserts);
     compensation=std::move(other.compensation);visibleLatency=compensation.totalLatency;pdcReady=other.pdcReady.load();configurationError=other.configurationError;
     recordingOptions=other.recordingOptions;bpm=other.bpm.load();beatsPerBar=other.beatsPerBar;beatUnit=other.beatUnit;
@@ -194,7 +195,7 @@ bool AudioEngine::rebuildGraph(juce::String& error) {
     MutationGuard mutation(*this);
     std::vector<PdcNode> nodes;nodes.reserve(static_cast<size_t>(count));
     for(int i=0;i<count;++i){const auto& t=track(i);int latency=t.instrument?t.instrument->latencySamples():0;for(const auto& insert:t.inserts)if(insert)latency+=insert->latencySamples();
-        nodes.push_back({t.auxiliary,t.outputTarget,latency,{t.sends[0].target,t.sends[1].target}});}
+        std::array<int,4> insertLatencies{};for(int slot=0;slot<4;++slot)if(t.inserts[slot])insertLatencies[slot]=t.inserts[slot]->latencySamples();nodes.push_back({t.auxiliary,t.outputTarget,latency,{t.sends[0].target,t.sends[1].target},t.sidechainSource,insertLatencies});}
     int masterLatency=0;for(const auto& insert:masterInserts)if(insert)masterLatency+=insert->latencySamples();
     DelayCompensation candidate;if(!candidate.build(nodes,masterLatency,error))return false;
     StereoDelay click;try{click.prepare(candidate.masterInputLatency);}catch(const std::bad_alloc&){error="Memoria insuficiente para metronomo/PDC.";return false;}
@@ -205,6 +206,7 @@ bool AudioEngine::setRoute(int source,int destination,juce::String& error) {
     if(source<0 || source>=count)return false;auto& t=track(source);const int old=t.outputTarget;t.outputTarget=destination;
     if(rebuildGraph(error))return true;t.outputTarget=old;return false;
 }
+bool AudioEngine::setSidechain(int index,int source,juce::String& error){MutationGuard guard(*this);if(index<0||index>=count||source<-1||source>=count||source==index||track(index).midiTrack){error="Sidechain exige destino de audio/aux e fonte diferente.";return false;}auto& t=track(index);const int previous=t.sidechainSource;t.sidechainSource=source;if(rebuildGraph(error))return true;t.sidechainSource=previous;return false;}
 bool AudioEngine::setSend(int source,int slot,int destination,bool pre,juce::String& error) {
     MutationGuard mutation(*this);
     if(source<0 || source>=count || slot<0 || slot>=2)return false;
@@ -258,25 +260,25 @@ void AudioEngine::renderBlock(float* const* output,int channels,int offset,int f
     auto automationTime=[&](int frame,int latency){const double t=seekOrigin+(elapsedSinceSeek+frame-latency)/rate;
         return looping && t>=le?ls+std::fmod(t-ls,le-ls):t;};
     bool anySolo=false;std::array<bool,maxTracks> audible{},sourceSolo{},required{};
-    for(int i=0;i<count;++i){sourceSolo[i]=track(i).solo;anySolo|=sourceSolo[i];}
+    for(int i=0;i<count;++i){const auto& t=track(i);sourceSolo[i]=t.solo||(t.channelGroup>=0&&channelGroups[t.channelGroup].solo.load());anySolo|=sourceSolo[i];}
     // Solo on a bus also admits its upstream sources, then keeps downstream returns audible.
     if(anySolo)for(int n=count-1;n>=0;--n){const int i=processingOrder[n];const auto& t=track(i);
         const auto& destinations=compensation.targets[i];if(destinations[0]>=0 && sourceSolo[destinations[0]])sourceSolo[i]=true;
         for(int j=1;j<3;++j)if(destinations[j]>=0 && sourceSolo[destinations[j]])sourceSolo[i]=true;}
-    required=sourceSolo;
+    required=sourceSolo;for(int i=0;i<count;++i)required[i]=required[i]||track(i).soloSafe.load();
     for(int n=0;n<count;++n){const int i=processingOrder[n];const auto& t=track(i);if(required[i]){
         for(int destination:compensation.targets[i])if(destination>=0)required[destination]=true;}}
-    for(int i=0;i<count;++i){channelBuffers[i].clear();audible[i]=!track(i).mute && (!anySolo || required[i]);}
+    for(int i=0;i<count;++i){channelBuffers[i].clear();const auto& t=track(i);audible[i]=!t.mute && !(t.vcaGroup>=0&&vcaGroups[t.vcaGroup].mute.load())&&!(t.channelGroup>=0&&channelGroups[t.channelGroup].mute.load())&&(!anySolo || required[i]);}
     masterBuffer.clear();
     std::array<float,maxTracks> peaks{},squares{};
     for(int n=0;n<count;++n){const int i=processingOrder[n];auto& t=track(i);auto& buffer=channelBuffers[i];
         const float input=std::clamp(t.inputGain.load(),0.0f,16.0f);
-        if(!smoothingInitialized){smoothGain[i].setCurrentAndTargetValue(t.gain.load());smoothPan[i].setCurrentAndTargetValue(t.pan.load());smoothInput[i].setCurrentAndTargetValue(input);smoothAudible[i].setCurrentAndTargetValue(audible[i]?1.0f:0.0f);for(int j=0;j<2;++j)smoothSend[i][j].setCurrentAndTargetValue(t.sends[j].gain.load());}
+        if(!smoothingInitialized){smoothGain[i].setCurrentAndTargetValue(t.gain.load());smoothPan[i].setCurrentAndTargetValue(t.pan.load());smoothInput[i].setCurrentAndTargetValue(input);smoothAudible[i].setCurrentAndTargetValue(audible[i]?1.0f:0.0f);for(int j=0;j<2;++j){smoothSend[i][j].setCurrentAndTargetValue(t.sends[j].mute?0:t.sends[j].gain.load());extended->smoothSendPan[i][j].setCurrentAndTargetValue(t.sends[j].pan.load());extended->smoothSendWidth[i][j].setCurrentAndTargetValue(t.sends[j].width.load());}extended->smoothGroupGain[i].setCurrentAndTargetValue((t.vcaGroup>=0?vcaGroups[t.vcaGroup].gain.load():1.0f)*(t.channelGroup>=0?channelGroups[t.channelGroup].gain.load():1.0f));}
         smoothInput[i].setTargetValue(input);smoothAudible[i].setTargetValue(audible[i]?1.0f:0.0f);
         if(t.midiTrack){scheduleTrackMidi(i,frames,offset,active);if(t.instrument)t.instrument->process(buffer,frames,&scheduledMidi[i]);}
         std::array<float,mixBlockSize> audibility{};for(int s=0;s<frames;++s)audibility[s]=smoothAudible[i].getNextValue();
         for(int s=0;s<frames;++s){const double time=timeAt(s);float pan=t.pan.load();
-            for(const auto& lane:t.automation){if(t.readsAutomation(lane)&&lane.target==-2)pan=lane.evaluate(automationTime(s,compensation.inputLatency[i]+(t.instrument?t.instrument->latencySamples():0)),pan);}
+            for(const auto& lane:t.automation){if(t.readsAutomation(lane)&&lane.target==-2)pan=lane.evaluate(automationTime(s,(t.auxiliary||t.midiTrack)?compensation.inputLatency[i]+(t.instrument?t.instrument->latencySamples():0):0),pan);}
             smoothPan[i].setTargetValue(std::clamp(pan,-1.0f,1.0f));
             const float p=smoothPan[i].getNextValue();const float in=smoothInput[i].getNextValue();
             if(active&&!t.auxiliary&&!t.midiTrack)for(const auto& region:t.regions){
@@ -293,6 +295,9 @@ void AudioEngine::renderBlock(float* const* output,int channels,int offset,int f
                 buffer.setSample(0,s,buffer.getSample(0,s)*(p>0?1-p:1));buffer.setSample(1,s,buffer.getSample(1,s)*(p<0?1+p:1));}
             for(int c=0;c<2;++c)buffer.setSample(c,s,buffer.getSample(c,s)*in);
         }
+        for(int s=0;s<frames;++s)if(t.sidechainSource>=0&&!t.auxiliary){const auto delayed=compensation.sidechain->sourceAlignment[i].process(buffer.getSample(0,s),buffer.getSample(1,s));buffer.setSample(0,s,delayed[0]);buffer.setSample(1,s,delayed[1]);}
+        const float* detectorPointers[2]{};const float* const* detector=nullptr;if(t.sidechainSource>=0){for(int s=0;s<frames;++s){const auto d=compensation.sidechain->detectorAlignment[i].process(extended->detectorTaps[t.sidechainSource].getSample(0,s),extended->detectorTaps[t.sidechainSource].getSample(1,s));extended->detectorBuffer.setSample(0,s,d[0]);extended->detectorBuffer.setSample(1,s,d[1]);}detectorPointers[0]=extended->detectorBuffer.getReadPointer(0);detectorPointers[1]=extended->detectorBuffer.getReadPointer(1);detector=detectorPointers;}
+        if(detector)for(int slot=0;slot<4;++slot)for(int s=0;s<frames;++s){const auto key=compensation.sidechain->detectorInserts[i][slot].process(detector[0][s],detector[1][s]);extended->detectorStages[slot].setSample(0,s,key[0]);extended->detectorStages[slot].setSample(1,s,key[1]);}
         // Parameter Read uses 16-sample segments; volume/pan interpolate each sample.
         const bool parameterAutomation=t.automationMode!=AutomationMode::off && t.automationMode!=AutomationMode::write && std::any_of(t.automation.begin(),t.automation.end(),[](const auto& lane){return lane.target>=0;});
         if(parameterAutomation){
@@ -300,17 +305,17 @@ void AudioEngine::renderBlock(float* const* output,int channels,int offset,int f
                 float* ptr[]{buffer.getWritePointer(0)+s,buffer.getWritePointer(1)+s};juce::AudioBuffer<float> segment(ptr,2,std::min(16,frames-s));
                 for(int slot=0;slot<4;++slot)if(auto& insert=t.inserts[slot]){
                     for(const auto& lane:t.automation)if(t.readsAutomation(lane)&&lane.target==slot)insert->setParameter(lane.parameter,lane.evaluate(automationTime(s,arrival),insert->parameter(lane.parameter)));
-                    insert->process(segment,segment.getNumSamples());arrival+=insert->latencySamples();}}
-        }else for(auto& insert:t.inserts)if(insert)insert->process(buffer,frames);
-        for(int j=0;j<2;++j){const auto& send=t.sends[j];smoothSend[i][j].setTargetValue(std::clamp(send.gain.load(),0.0f,2.0f));
+                    const float* key[]{detector?extended->detectorStages[slot].getReadPointer(0)+s:nullptr,detector?extended->detectorStages[slot].getReadPointer(1)+s:nullptr};insert->process(segment,segment.getNumSamples(),nullptr,0,detector?key:nullptr);arrival+=insert->latencySamples();}}
+        }else for(int slot=0;slot<4;++slot)if(auto& insert=t.inserts[slot])insert->process(buffer,frames,nullptr,0,detector?extended->detectorStages[slot].getArrayOfReadPointers():nullptr);
+        for(int j=0;j<2;++j){const auto& send=t.sends[j];smoothSend[i][j].setTargetValue(send.mute?0:std::clamp(send.gain.load(),0.0f,2.0f));extended->smoothSendPan[i][j].setTargetValue(send.pan.load());extended->smoothSendWidth[i][j].setTargetValue(send.width.load());
             const int target=compensation.targets[i][j+1];if(target>=0 && send.preFader)for(int s=0;s<frames;++s){const float g=smoothSend[i][j].getNextValue()*audibility[s];
-                const auto values=compensation.edges[i][j+1].process(buffer.getSample(0,s)*g,buffer.getSample(1,s)*g);for(int c=0;c<2;++c)channelBuffers[target].addSample(c,s,values[c]);}}
+                const float left=buffer.getSample(0,s),right=buffer.getSample(1,s),middle=(left+right)*0.5f,side=(left-right)*0.5f*extended->smoothSendWidth[i][j].getNextValue(),pan=extended->smoothSendPan[i][j].getNextValue();const auto values=compensation.edges[i][j+1].process((middle+side)*g*(pan>0?1-pan:1),(middle-side)*g*(pan<0?1+pan:1));for(int c=0;c<2;++c)channelBuffers[target].addSample(c,s,values[c]);}}
         // Smooth fader after inserts/pre sends. Targets are re-evaluated at the sample's transport position.
         for(int s=0;s<frames;++s){float g=t.gain.load();for(const auto& lane:t.automation)if(t.readsAutomation(lane)&&lane.target==-1)g=lane.evaluate(automationTime(s,compensation.outputLatency[i]),g);
-            smoothGain[i].setTargetValue(std::clamp(g,0.0f,2.0f));const float f=smoothGain[i].getNextValue();
-            for(int c=0;c<2;++c){const float v=buffer.getSample(c,s)*f*audibility[s];buffer.setSample(c,s,v);peaks[i]=std::max(peaks[i],std::abs(v));squares[i]+=v*v;}}
+            smoothGain[i].setTargetValue(std::clamp(g,0.0f,2.0f));const float groupGain=(t.vcaGroup>=0?vcaGroups[t.vcaGroup].gain.load():1.0f)*(t.channelGroup>=0?channelGroups[t.channelGroup].gain.load():1.0f);extended->smoothGroupGain[i].setTargetValue(groupGain);const float f=smoothGain[i].getNextValue()*extended->smoothGroupGain[i].getNextValue();
+            for(int c=0;c<2;++c){const float tap=buffer.getSample(c,s)*f;extended->detectorTaps[i].setSample(c,s,t.mute?0:tap);const float v=tap*audibility[s];buffer.setSample(c,s,v);peaks[i]=std::max(peaks[i],std::abs(v));squares[i]+=v*v;}}
         for(int j=0;j<2;++j){const auto& send=t.sends[j];const int target=compensation.targets[i][j+1];if(target>=0 && !send.preFader)for(int s=0;s<frames;++s){const float g=smoothSend[i][j].getNextValue();
-                const auto values=compensation.edges[i][j+1].process(buffer.getSample(0,s)*g,buffer.getSample(1,s)*g);for(int c=0;c<2;++c)channelBuffers[target].addSample(c,s,values[c]);}}
+                const float left=buffer.getSample(0,s),right=buffer.getSample(1,s),middle=(left+right)*0.5f,side=(left-right)*0.5f*extended->smoothSendWidth[i][j].getNextValue(),pan=extended->smoothSendPan[i][j].getNextValue();const auto values=compensation.edges[i][j+1].process((middle+side)*g*(pan>0?1-pan:1),(middle-side)*g*(pan<0?1+pan:1));for(int c=0;c<2;++c)channelBuffers[target].addSample(c,s,values[c]);}}
         const int target=compensation.targets[i][0];auto& destination=target<0?masterBuffer:channelBuffers[target];const int mode=t.outputMode.load();
         for(int s=0;s<frames;++s){const float l=buffer.getSample(0,s),r=buffer.getSample(1,s);const auto values=compensation.edges[i][0].process(mode==2?0:mode==1?(l+r)*0.5f:l,mode==1?0:mode==2?(l+r)*0.5f:r);
             destination.addSample(0,s,values[0]);destination.addSample(1,s,values[1]);}

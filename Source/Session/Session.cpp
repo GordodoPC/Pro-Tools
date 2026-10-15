@@ -14,8 +14,8 @@ bool readInserts(const juce::var& value,std::array<std::unique_ptr<MixProcessor>
     return true;
 }
 juce::var mixState(const Track& t){auto o=std::make_unique<juce::DynamicObject>();o->setProperty("inputGain",t.inputGain.load());o->setProperty("outputTarget",t.outputTarget);
-    o->setProperty("inserts",insertState(t.inserts));juce::Array<juce::var> sends;
-    for(const auto& send:t.sends){auto v=std::make_unique<juce::DynamicObject>();v->setProperty("target",send.target);v->setProperty("preFader",send.preFader);v->setProperty("gain",send.gain.load());sends.add(juce::var(v.release()));}
+    o->setProperty("vcaGroup",t.vcaGroup);o->setProperty("channelGroup",t.channelGroup);o->setProperty("sidechainSource",t.sidechainSource);o->setProperty("soloSafe",t.soloSafe.load());o->setProperty("inserts",insertState(t.inserts));juce::Array<juce::var> sends;
+    for(const auto& send:t.sends){auto v=std::make_unique<juce::DynamicObject>();v->setProperty("target",send.target);v->setProperty("preFader",send.preFader);v->setProperty("gain",send.gain.load());v->setProperty("pan",send.pan.load());v->setProperty("width",send.width.load());v->setProperty("mute",send.mute.load());sends.add(juce::var(v.release()));}
     o->setProperty("sends",sends);o->setProperty("automationMode",int(t.automationMode));juce::Array<juce::var> lanes;
     for(const auto& lane:t.automation){auto l=std::make_unique<juce::DynamicObject>();l->setProperty("target",lane.target);l->setProperty("parameter",lane.parameter);juce::Array<juce::var> points;
         for(const auto& point:lane.points){auto v=std::make_unique<juce::DynamicObject>();v->setProperty("time",point.time);v->setProperty("value",point.value);v->setProperty("curve",point.curve);points.add(juce::var(v.release()));}
@@ -27,11 +27,11 @@ bool readMix(const juce::var& v,Track& t,double rate,juce::String& error){
         || !v["outputTarget"].isInt() || !v["sends"].isArray() || v["sends"].getArray()->size()!=2
         || !v["automationMode"].isInt() || int(v["automationMode"])<0 || int(v["automationMode"])>4
         || !v["automation"].isArray() || v["automation"].getArray()->size()>64){error="Mixagem/automacao invalida; modo/limites invalidos.";return false;}
-    t.inputGain=float(v["inputGain"]);t.outputTarget=int(v["outputTarget"]);t.automationMode=static_cast<AutomationMode>(int(v["automationMode"]));
+    if(!v["vcaGroup"].isVoid()){if(!v["vcaGroup"].isInt()||!v["channelGroup"].isInt()||!v["sidechainSource"].isInt()||!v["soloSafe"].isBool()||int(v["vcaGroup"])<-1||int(v["vcaGroup"])>=8||int(v["channelGroup"])<-1||int(v["channelGroup"])>=8||int(v["sidechainSource"])<-1||int(v["sidechainSource"])>=64||(t.midiTrack&&int(v["sidechainSource"])>=0)){error="Grupos/sidechain invalidos.";return false;}t.vcaGroup=int(v["vcaGroup"]);t.channelGroup=int(v["channelGroup"]);t.sidechainSource=int(v["sidechainSource"]);t.soloSafe=bool(v["soloSafe"]);}t.inputGain=float(v["inputGain"]);t.outputTarget=int(v["outputTarget"]);t.automationMode=static_cast<AutomationMode>(int(v["automationMode"]));
     if(!readInserts(v["inserts"],t.inserts,rate,error))return false;
     for(int i=0;i<2;++i){const auto& send=v["sends"].getArray()->getReference(i);
         if(!send.isObject() || !send["target"].isInt() || !send["preFader"].isBool() || !numeric(send["gain"]) || !std::isfinite(double(send["gain"])) || double(send["gain"])<0 || double(send["gain"])>2){error="Send invalido.";return false;}
-        t.sends[i].target=int(send["target"]);t.sends[i].preFader=bool(send["preFader"]);t.sends[i].gain=float(send["gain"]);
+        if(!send["pan"].isVoid()){if(!numeric(send["pan"])||!numeric(send["width"])||!send["mute"].isBool()||!std::isfinite(double(send["pan"]))||!std::isfinite(double(send["width"]))||double(send["pan"])<-1||double(send["pan"])>1||double(send["width"])<0||double(send["width"])>2){error="Pan/width de send invalido.";return false;}t.sends[i].pan=float(send["pan"]);t.sends[i].width=float(send["width"]);t.sends[i].mute=bool(send["mute"]);}t.sends[i].target=int(send["target"]);t.sends[i].preFader=bool(send["preFader"]);t.sends[i].gain=float(send["gain"]);
     }
     std::set<std::pair<int,int>> identities;
     for(const auto& item:*v["automation"].getArray()){
@@ -54,7 +54,7 @@ bool Session::save(const juce::File& file, const AudioEngine& engine, juce::Stri
     engine.automation->finishAll();auto root = std::make_unique<juce::DynamicObject>();
     root->setProperty("format", "nova-daw-session"); root->setProperty("version", 7);root->setProperty("midiPpq",midiPpq);root->setProperty("metronome",engine.metronomeEnabled.load());
     const auto& record=engine.recordingOptions;auto settings=std::make_unique<juce::DynamicObject>();settings->setProperty("punch",record.punch);settings->setProperty("loop",record.loop);settings->setProperty("punchIn",record.punchIn);settings->setProperty("punchOut",record.punchOut);settings->setProperty("preRoll",record.preRoll);settings->setProperty("postRoll",record.postRoll);settings->setProperty("loopStart",record.loopStart);settings->setProperty("loopEnd",record.loopEnd);root->setProperty("recording",juce::var(settings.release()));
-    root->setProperty("masterGain", engine.masterGain.load());
+    juce::Array<juce::var> groups;for(int kind=0;kind<2;++kind)for(int i=0;i<8;++i){const auto& g=kind?engine.channelGroups[i]:engine.vcaGroups[i];auto o=std::make_unique<juce::DynamicObject>();o->setProperty("name",g.name);o->setProperty("gain",g.gain.load());o->setProperty("mute",g.mute.load());o->setProperty("solo",g.solo.load());groups.add(juce::var(o.release()));}root->setProperty("mixGroups",groups);root->setProperty("masterGain", engine.masterGain.load());
     root->setProperty("masterMute",engine.masterMute.load());root->setProperty("masterInserts",insertState(engine.masterInserts));
     root->setProperty("bpm",engine.bpm.load()); root->setProperty("beatsPerBar",engine.beatsPerBar); root->setProperty("beatUnit",engine.beatUnit);
     root->setProperty("loopEnabled",engine.loopEnabled.load()); root->setProperty("loopStart",engine.loopStart.load()); root->setProperty("loopEnd",engine.loopEnd.load());
@@ -179,7 +179,7 @@ bool Session::load(const juce::File& file, AudioEngine& engine, juce::String& er
     }
     double end=0;for(const auto& entry:entries){for(const auto& r:entry.regions)end=std::max(end,r.end());for(const auto& midi:entry.midiClips)end=std::max(end,ticksToSeconds(midi.start+midi.length,bpm));}
     if(v2 && static_cast<bool>(data["loopEnabled"]) && (le<=ls || le>end+1e-8)){error="Loop fora da sessao.";return false;}
-    auto candidate=std::make_unique<AudioEngine>();candidate->setOutputRate(engine.sampleRate());
+    auto candidate=std::make_unique<AudioEngine>();candidate->setOutputRate(engine.sampleRate());if(!data["mixGroups"].isVoid()){const auto& groups=data["mixGroups"];if(!groups.isArray()||groups.size()!=16){error="Grupos de mixagem invalidos.";return false;}for(int n=0;n<16;++n){const auto& v=groups.getArray()->getReference(n);if(!v.isObject()||!v["name"].isString()||v["name"].toString().length()>128||!numeric(v["gain"])||!std::isfinite(double(v["gain"]))||double(v["gain"])<0||double(v["gain"])>4||!v["mute"].isBool()||!v["solo"].isBool()){error="Configuracao de grupo invalida.";return false;}auto& g=n<8?candidate->vcaGroups[n]:candidate->channelGroups[n-8];g.name=v["name"].toString();g.gain=float(v["gain"]);g.mute=bool(v["mute"]);g.solo=bool(v["solo"]);}}
     for (auto& entry : entries) {
         if(!candidate->addSharedClip(entry.clip, error))return false;
         auto& t = candidate->track(candidate->trackCount() - 1);

@@ -26,6 +26,8 @@ struct PdcNode {
     bool auxiliary = false;
     int output = -1, latency = 0;
     std::array<int,2> sends{-1,-1};
+    int sidechainSource=-1;
+    std::array<int,4> insertLatencies{};
 };
 class DelayCompensation {
 public:
@@ -37,6 +39,8 @@ public:
     std::array<int, maximumNodes> order{}, inputLatency{}, outputLatency{};
     std::array<std::array<int,3>,maximumNodes> targets{};
     std::array<std::array<StereoDelay,3>, maximumNodes> edges;
+    struct SidechainDelays {std::array<StereoDelay,maximumNodes> sourceAlignment,detectorAlignment;std::array<std::array<StereoDelay,4>,maximumNodes> detectorInserts;};
+    std::unique_ptr<SidechainDelays> sidechain;
     int masterInputLatency = 0, totalLatency = 0;
     size_t allocatedBytes = 0;
 };

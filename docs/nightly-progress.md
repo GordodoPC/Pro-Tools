@@ -148,3 +148,13 @@
   Regressão Debug13/13 passou; Release em execução neste registro intermediário.
 - Fechamento: Debug13/13 40,61s e Release13/13 22,95s, 539 checks + dois smoke;
   UI Edit/Mix/automação nas duas builds passou em build/phase7-automation-ui-*.
+
+## 2026-10-15 — Fase 7, VCA/grupos/sidechain/sends
+
+- Automação no commit9d759da. Oito VCAs/oito grupos, Solo Safe, sends pan/width/
+  mute e key externo no Compressor/Gate nativo, com grafo/PDC e persistência.
+- Matriz mono/stereo/5.1/7.1 preparada; IO/playback atual segue stereo.
+-19 checks novos; CTest Debug14/14 33,01s e Release14/14 18,46s, 558 + dois smoke.
+  UI com curva/Undo e grupos passou em build/phase7-mix-final-ui-*.
+- Regressão de pilha Debug corrigida movendo estado adicional para heap de
+  controle; nenhuma pilha/critério de teste aumentado. Limites em phase7-report.md.

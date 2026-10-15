@@ -65,17 +65,41 @@ public:
             if(!apply([&,target,isPre]{return engine.setSend(index,sendSlot,target,isPre,error);})){juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Roteamento",error);destination.setSelectedId(engine.track(index).sends[sendSlot].target+2,juce::dontSendNotification);pre.setToggleState(engine.track(index).sends[sendSlot].preFader,juce::dontSendNotification);}};
         destination.onChange=route;pre.onClick=route;label.setText("Nivel do send (dB)",juce::dontSendNotification);
         level.setRange(-60,6,0.1);level.setValue(juce::Decibels::gainToDecibels(send.gain.load(),-60.0f));level.setTextBoxStyle(juce::Slider::TextBoxRight,false,75,22);
-        level.onValueChange=[this]{engine.track(index).sends[sendSlot].gain=level.getValue()<=-60?0:juce::Decibels::decibelsToGain(float(level.getValue()));changed();};setSize(400,180);
+        level.onValueChange=[this]{engine.track(index).sends[sendSlot].gain=level.getValue()<=-60?0:juce::Decibels::decibelsToGain(float(level.getValue()));changed();};
+        addAndMakeVisible(pan);addAndMakeVisible(width);addAndMakeVisible(mute);pan.setRange(-1,1,0.01);pan.setTextValueSuffix(" pan");width.setRange(0,2,0.01);width.setTextValueSuffix(" width");pan.setValue(send.pan);width.setValue(send.width);mute.setClickingTogglesState(true);mute.setToggleState(send.mute,juce::dontSendNotification);
+        pan.onValueChange=[this]{engine.track(index).sends[sendSlot].pan=float(pan.getValue());changed();};width.onValueChange=[this]{engine.track(index).sends[sendSlot].width=float(width.getValue());changed();};mute.onClick=[this]{engine.track(index).sends[sendSlot].mute=mute.getToggleState();changed();};setSize(440,290);
     }
-    void resized()override{destination.setBounds(15,15,getWidth()-30,30);pre.setBounds(15,55,160,28);label.setBounds(15,95,getWidth()-30,22);level.setBounds(15,120,getWidth()-30,30);}
+    void resized()override{destination.setBounds(15,15,getWidth()-30,30);pre.setBounds(15,55,160,28);label.setBounds(15,95,getWidth()-30,22);level.setBounds(15,120,getWidth()-30,30);pan.setBounds(15,160,getWidth()-30,30);width.setBounds(15,200,getWidth()-30,30);mute.setBounds(15,245,120,25);}
     bool validateBindings(int auxiliary){destination.setSelectedId(auxiliary+2,juce::sendNotificationSync);pre.setToggleState(true,juce::dontSendNotification);pre.onClick();level.setValue(-6,juce::sendNotificationSync);
         const auto& send=engine.track(index).sends[sendSlot];return send.target==auxiliary&&send.preFader&&std::abs(send.gain.load()-juce::Decibels::decibelsToGain(-6.0f))<1e-5f;}
-private:AudioEngine& engine;int index,sendSlot;MixEdit apply;std::function<void()> changed;juce::ComboBox destination;juce::TextButton pre{"Pre-fader"};juce::Slider level;juce::Label label;
+private:AudioEngine& engine;int index,sendSlot;MixEdit apply;std::function<void()> changed;juce::ComboBox destination;juce::TextButton pre{"Pre-fader"},mute{"Mute send"};juce::Slider level,pan,width;juce::Label label;
+};
+class GroupPanel final : public juce::Component {
+public:
+    GroupPanel(AudioEngine& e,int track,MixEdit a,std::function<void()> c):engine(e),index(track),apply(std::move(a)),changed(std::move(c)){
+        for(auto* child:std::initializer_list<juce::Component*>{&vca,&group,&sidechain,&kind,&number,&name,&gain,&mute,&solo,&safe,&info})addAndMakeVisible(child);
+        vca.addItem("Sem VCA",1);group.addItem("Sem grupo",1);for(int i=0;i<8;++i){vca.addItem("VCA "+juce::String(i+1),i+2);group.addItem("Grupo "+juce::String(i+1),i+2);number.addItem(juce::String(i+1),i+1);}vca.setSelectedId(e.track(index).vcaGroup+2);group.setSelectedId(e.track(index).channelGroup+2);
+        vca.onChange=[this]{apply([&]{engine.track(index).vcaGroup=vca.getSelectedId()-2;return true;});};group.onChange=[this]{apply([&]{engine.track(index).channelGroup=group.getSelectedId()-2;return true;});};
+        sidechain.addItem("Sidechain: desligado",1);for(int i=0;i<e.trackCount();++i)if(i!=index)sidechain.addItem("Key: "+e.track(i).name,i+2);sidechain.setSelectedId(e.track(index).sidechainSource+2);
+        sidechain.onChange=[this]{juce::String error;if(!apply([&]{return engine.setSidechain(index,sidechain.getSelectedId()-2,error);})){sidechain.setSelectedId(engine.track(index).sidechainSource+2,juce::dontSendNotification);info.setText(error,juce::dontSendNotification);}};
+        kind.addItem("VCA",1);kind.addItem("Grupo de canais",2);kind.setSelectedId(1);number.setSelectedId(1);kind.onChange=[this]{refresh();};number.onChange=[this]{refresh();};
+        gain.setRange(-60,12,0.1);gain.setTextValueSuffix(" dB grupo");gain.onValueChange=[this]{selected().gain=gain.getValue()<=-60?0:juce::Decibels::decibelsToGain(float(gain.getValue()));changed();};
+        mute.setClickingTogglesState(true);solo.setClickingTogglesState(true);safe.setClickingTogglesState(true);mute.onClick=[this]{selected().mute=mute.getToggleState();changed();};solo.onClick=[this]{selected().solo=solo.getToggleState();changed();};safe.setToggleState(e.track(index).soloSafe,juce::dontSendNotification);safe.onClick=[this]{engine.track(index).soloSafe=safe.getToggleState();changed();};name.onTextChange=[this]{apply([&]{selected().name=name.getText().substring(0,128);return true;});};
+        info.setText("Key externo: NOVA Compressor/Gate. PDC inclui a fonte e os inserts anteriores.\nVCA/grupos afetam pos-fader; sends pre-fader preservam nivel.\nRender/dispositivo atuais: stereo. Matriz 5.1/7.1 preparada na API.",juce::dontSendNotification);setSize(620,430);refresh();
+    }
+    void resized()override{vca.setBounds(15,15,280,28);group.setBounds(310,15,295,28);sidechain.setBounds(15,55,590,28);safe.setBounds(15,95,200,28);kind.setBounds(15,140,220,28);number.setBounds(245,140,80,28);name.setBounds(15,180,590,28);gain.setBounds(15,220,590,32);mute.setBounds(15,265,120,28);solo.setBounds(145,265,120,28);info.setBounds(15,310,590,100);}
+    bool validateBindings(){vca.setSelectedId(2,juce::sendNotificationSync);group.setSelectedId(2,juce::sendNotificationSync);gain.setValue(-6,juce::sendNotificationSync);safe.setToggleState(true,juce::dontSendNotification);safe.onClick();return engine.track(index).vcaGroup==0&&engine.track(index).channelGroup==0&&engine.track(index).soloSafe&&std::abs(engine.vcaGroups[0].gain.load()-juce::Decibels::decibelsToGain(-6.0f))<1e-6f;}
+private:
+    AudioEngine& engine;int index;MixEdit apply;std::function<void()> changed;juce::ComboBox vca,group,sidechain,kind,number;juce::TextEditor name;juce::Slider gain;juce::TextButton mute{"Mute grupo"},solo{"Solo grupo"},safe{"Solo Safe"};juce::Label info;
+    AudioEngine::Group& selected(){return kind.getSelectedId()==1?engine.vcaGroups[std::max(0,number.getSelectedId()-1)]:engine.channelGroups[std::max(0,number.getSelectedId()-1)];}
+    void refresh(){auto& g=selected();name.setText(g.name,false);gain.setValue(juce::Decibels::gainToDecibels(g.gain.load(),-60.0f),juce::dontSendNotification);mute.setToggleState(g.mute,juce::dontSendNotification);solo.setToggleState(g.solo,juce::dontSendNotification);solo.setEnabled(kind.getSelectedId()==2);}
 };
 class AutomationCurve final : public juce::Component {
 public:
     AutomationCurve(AudioEngine& e,int i,MixEdit a):engine(e),index(i),apply(std::move(a)){}
     int target=-1,parameter=0,shape=0;
+    bool validateEdit(){load();if(draft.empty())return false;const float old=draft.front().value;draft.front().value=(low+high)*0.5f;const float expected=draft.front().value;commit();bool changed=false;for(const auto& lane:engine.track(index).automation)if(lane.target==target&&lane.parameter==parameter)changed=lane.points.front().value==expected;
+        const bool undone=apply([&]{return engine.automation->undo();});bool restored=false;for(const auto& lane:engine.track(index).automation)if(lane.target==target&&lane.parameter==parameter)restored=lane.points.front().value==old;return changed&&undone&&restored;}
     void paint(juce::Graphics& g)override{g.fillAll(juce::Colour(0xff0e141d));if(!dragging)load();const auto box=getLocalBounds().toFloat().reduced(8);g.setColour(juce::Colour(0xff3a4558));g.drawRect(box);juce::Path path;
         AutomationLane lane{target,parameter,draft};for(int x=0;x<int(box.getWidth());++x){const float y=toY(lane.evaluate(x/double(box.getWidth())*span,0));if(x==0)path.startNewSubPath(box.getX(),y);else path.lineTo(box.getX()+x,y);}g.setColour(accent);g.strokePath(path,juce::PathStrokeType(2));for(const auto& p:draft)g.fillEllipse(toX(p.time)-3,toY(p.value)-3,6,6);}
     void mouseDown(const juce::MouseEvent& e)override{load();selected=-1;float distance=12;for(int n=0;n<int(draft.size());++n){const float d=juce::Point<float>(toX(draft[n].time),toY(draft[n].value)).getDistanceFrom(e.position);if(d<distance){distance=d;selected=n;}}
@@ -130,7 +154,7 @@ public:
     void resized()override{target.setBounds(15,15,getWidth()-30,28);parameter.setBounds(15,50,getWidth()-150,28);mode.setBounds(getWidth()-125,50,110,28);
         instructions.setBounds(15,85,getWidth()-30,65);shape.setBounds(15,150,140,25);live.setBounds(165,150,getWidth()-180,25);curve.setBounds(15,185,getWidth()-30,180);points.setBounds(15,375,getWidth()-30,getHeight()-465);undo.setBounds(15,getHeight()-85,120,25);redo.setBounds(145,getHeight()-85,120,25);commit.setBounds(15,getHeight()-55,150,30);result.setBounds(175,getHeight()-55,getWidth()-190,30);}
     bool validateBindings(){target.setSelectedId(1,juce::sendNotificationSync);parameter.setSelectedId(1,juce::dontSendNotification);mode.setSelectedId(2,juce::dontSendNotification);points.setText("0 : 0.5\n1 : 1");commit.onClick();
-        const auto& t=engine.track(index);return t.automationMode==AutomationMode::read&&std::any_of(t.automation.begin(),t.automation.end(),[](const auto& lane){return lane.target==-1&&lane.points.size()==2&&lane.points[0].value==0.5f;});}
+        const bool edited=curve.validateEdit();const auto& t=engine.track(index);return edited&&t.automationMode==AutomationMode::read&&std::any_of(t.automation.begin(),t.automation.end(),[](const auto& lane){return lane.target==-1&&lane.points.size()==2&&lane.points[0].value==0.5f;});}
 private:AudioEngine& engine;int index;MixEdit apply;AutomationCurve curve;juce::ComboBox target,parameter,mode,shape;juce::Slider live;juce::TextEditor points;juce::Label instructions,result;juce::TextButton commit{"Aplicar lane"},undo{"Undo automacao"},redo{"Redo automacao"};
     void loadPoints(){const int selected=target.getSelectedId();const int dest=selected==1?-1:selected==2?-2:selected-3;const int param=parameter.getSelectedId()-1;juce::String text;
         curve.target=dest;curve.parameter=std::max(0,param);float low=dest==-2?-1.0f:0,high=dest==-2?1.0f:2;if(dest>=0&&engine.track(index).inserts[dest]){auto spec=engine.track(index).inserts[dest]->spec(curve.parameter);low=spec.minimum;high=spec.maximum;}live.setRange(low,high);live.setValue(dest==-1?engine.track(index).gain.load():dest==-2?engine.track(index).pan.load():engine.track(index).inserts[dest]?engine.track(index).inserts[dest]->parameter(curve.parameter):0,juce::dontSendNotification);
@@ -141,6 +165,7 @@ void meter(juce::Graphics& g,juce::Rectangle<float> r,float value){g.setColour(j
 }
 std::unique_ptr<juce::DocumentWindow> createPluginManager(PluginCatalog& catalog){return std::make_unique<ToolWindow>(new PluginManagerPanel(catalog),"Plugins VST3");}
 ChannelStrip::ChannelStrip(AudioEngine& e,EditModel& ed,int i,PluginCatalog& cat,MixEdit a,std::function<void()> c):engine(e),edit(ed),index(i),catalog(cat),apply(std::move(a)),changed(std::move(c)){
+    addAndMakeVisible(groups);groups.onClick=[this]{if(index>=0){closeEditors();toolWindow=std::make_unique<ToolWindow>(new GroupPanel(engine,index,apply,changed),"VCA, grupos e sidechain");}};if(index<0)groups.setVisible(false);
     for(auto* child:std::initializer_list<juce::Component*>{&name,&input,&peakLabel,&gain,&pan,&inputGain,&mute,&solo,&clip,&colour,&automation,&output})addAndMakeVisible(child);
     for(int slot=0;slot<4;++slot){addAndMakeVisible(inserts[slot]);inserts[slot].onClick=[this,slot]{insertMenu(slot);};}
     for(int slot=0;slot<2;++slot){addAndMakeVisible(sends[slot]);sends[slot].onClick=[this,slot]{sendEditor(slot);};}
@@ -214,7 +239,7 @@ void ChannelStrip::refresh(){
 }
 void ChannelStrip::resized(){const int w=getWidth();name.setBounds(8,6,w-50,24);colour.setBounds(w-42,7,34,22);input.setBounds(8,33,w-16,19);output.setBounds(8,55,w-16,24);inputGain.setBounds(8,82,w-16,27);
     for(int i=0;i<4;++i)inserts[i].setBounds(8,114+i*25,w-16,23);for(int i=0;i<2;++i)sends[i].setBounds(8,219+i*25,w-16,23);
-    automation.setBounds(8,271,w-16,23);pan.setBounds(8,299,w-16,70);mute.setBounds(8,373,38,24);solo.setBounds(50,373,38,24);clip.setBounds(w-66,373,58,24);
+    automation.setBounds(8,271,(w-24)/2,23);groups.setBounds(w/2+4,271,(w-24)/2,23);pan.setBounds(8,299,w-16,70);mute.setBounds(8,373,38,24);solo.setBounds(50,373,38,24);clip.setBounds(w-66,373,58,24);
     peakLabel.setBounds(8,401,w-16,22);gain.setBounds(12,428,w-62,std::max(110,getHeight()-437));}
 void ChannelStrip::paint(juce::Graphics& g){g.fillAll(panel);g.setColour(index<0?accent:juce::Colour(engine.track(index).colour));g.fillRect(0,0,getWidth(),3);g.setColour(juce::Colour(0xff334053));g.drawRect(getLocalBounds());
     const float peak=index<0?engine.masterPeak.load():engine.track(index).peak.load(),rms=index<0?engine.masterRms.load():engine.track(index).rms.load();
@@ -228,8 +253,10 @@ bool ChannelStrip::validatePhase3Bindings(int auxiliary){
     auto* send=new SendPanel(engine,index,0,apply,changed);toolWindow=std::make_unique<ToolWindow>(send,"Send validation");const bool sendOk=send->validateBindings(auxiliary);closeEditors();
     auto* automationPanel=new AutomationPanel(engine,index,apply);toolWindow=std::make_unique<ToolWindow>(automationPanel,"Automation validation");const bool automationOk=automationPanel->validateBindings();closeEditors();
     // Native editor, send and automation share the actual components used by their buttons.
-    return effectOk&&sendOk&&automationOk;
+    return effectOk&&sendOk&&automationOk&&validateProfessionalBindings();
 }
+bool ChannelStrip::validateProfessionalBindings(){if(index<0)return false;auto& t=engine.track(index);const int oldVca=t.vcaGroup,oldGroup=t.channelGroup;const float oldGain=engine.vcaGroups[0].gain;const bool oldSafe=t.soloSafe;
+    auto* content=new GroupPanel(engine,index,apply,changed);toolWindow=std::make_unique<ToolWindow>(content,"VCA / Group validation");const bool passed=content->validateBindings();closeEditors();apply([&]{t.vcaGroup=oldVca;t.channelGroup=oldGroup;t.soloSafe=oldSafe;engine.vcaGroups[0].gain=oldGain;return true;});return passed;}
 bool ChannelStrip::validateBindings(){if(index<0)return false;refresh();auto& t=engine.track(index);const float oldGain=t.gain,oldPan=t.pan,oldInput=t.inputGain;const bool oldMute=t.mute,oldSolo=t.solo;const int oldMode=t.outputMode,oldTarget=t.outputTarget;
     gain.setValue(-6,juce::sendNotificationSync);pan.setValue(1,juce::sendNotificationSync);inputGain.setValue(6,juce::sendNotificationSync);mute.setToggleState(true,juce::sendNotificationSync);solo.setToggleState(true,juce::sendNotificationSync);output.setSelectedId(3,juce::sendNotificationSync);
     const bool ok=std::abs(t.gain.load()-juce::Decibels::decibelsToGain(-6.0f))<1e-5f&&t.pan==1&&t.mute&&t.solo&&t.outputMode==2&&t.inputGain>1.99f;

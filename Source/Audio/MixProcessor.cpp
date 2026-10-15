@@ -91,7 +91,7 @@ void MixProcessor::updateEq(const std::array<float,24>& p,double rate){
     for(auto& a:coefficients){const float denominator=a[3];for(auto& value:a)value/=denominator;}
     lastEqParameters=p;eqValid=true;++eqRebuilds;
 }
-void MixProcessor::process(juce::AudioBuffer<float>& buffer,int frames,const juce::MidiBuffer* inputMidi,int midiOffset)noexcept {
+void MixProcessor::process(juce::AudioBuffer<float>& buffer,int frames,const juce::MidiBuffer* inputMidi,int midiOffset,const float* const* detector)noexcept {
     if(frames<1 || frames>mixBlockSize || buffer.getNumChannels()<2 || buffer.getNumSamples()<frames)return;
     auto* l=buffer.getWritePointer(0);auto* r=buffer.getWritePointer(1);
     for(int s=0;s<frames;++s){const auto delayed=dryCompensation.process(l[s],r[s]);dry[0][s]=delayed[0];dry[1][s]=delayed[1];}
@@ -123,7 +123,7 @@ void MixProcessor::process(juce::AudioBuffer<float>& buffer,int frames,const juc
                     buffer.setSample(c,s,value);
                 }
             }else if(kind==EffectKind::compressor){
-                const float level=std::max(std::abs(l[s]),std::abs(r[s]));
+                const float level=detector?std::max(std::abs(detector[0][s]),std::abs(detector[1][s])):std::max(std::abs(l[s]),std::abs(r[s]));
                 const float coefficient=std::exp(-1.0f/static_cast<float>(sampleRate*0.001*(level>envelope?p[2]:p[3])));
                 envelope=level+(envelope-level)*coefficient;
                 const float over=db(envelope)-p[0],knee=p[4];float gr=0;
@@ -132,7 +132,7 @@ void MixProcessor::process(juce::AudioBuffer<float>& buffer,int frames,const juc
                 const float gain=juce::Decibels::decibelsToGain(p[5]-gr);reduction=gr;
                 l[s]*=1+p[6]*(gain-1);r[s]*=1+p[6]*(gain-1);
             }else if(kind==EffectKind::gate){
-                const bool open=db(std::max(std::abs(l[s]),std::abs(r[s])))>=p[0];
+                const float level=detector?std::max(std::abs(detector[0][s]),std::abs(detector[1][s])):std::max(std::abs(l[s]),std::abs(r[s]));const bool open=db(level)>=p[0];
                 if(open)holdSamples=static_cast<int>(sampleRate*p[2]*0.001);else if(holdSamples>0)--holdSamples;
                 const float target=open||holdSamples>0?1.0f:0.0f;
                 const float c=std::exp(-1.0f/static_cast<float>(sampleRate*0.001*(target>gateGain?p[1]:p[3])));

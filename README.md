@@ -311,3 +311,9 @@ estão no painel, após parar o transporte. Salvar fecha a captura pendente.
 Captura tem resolução de UI (30 Hz); Read continua calculado no render.
 O slider do painel controla parâmetros VST3 reais; editores de terceiros
 arbitrários ainda não enviam gestos ao gravador de automação.
+
+**VCA / SC** em cada canal MIX configura membership em VCA/grupo, ganho/mute,
+solo de grupo, Solo Safe e fonte de sidechain do NOVA Compressor/Gate.
+Key externo tem PDC inclusive com inserts de latência antes do detector.
+Sends oferecem pan, largura estéreo e mute. O playback permanece stereo;
+ChannelMatrix prepara a evolução para mais canais, sem habilitar surround no device.
