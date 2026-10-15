@@ -1,3 +1,5 @@
+#include "App/AppPaths.h"
+#include "App/Diagnostics.h"
 #include "MainComponent.h"
 #include "Session/AutomationModel.h"
 #include "Midi/MidiRuntime.h"
@@ -72,9 +74,9 @@ MainComponent::MainComponent()
     gridBox.addItemList({"Grid: 1 beat","Grid: 1/2","Grid: 1/4","Grid: 1/8"},1); gridBox.setSelectedId(1);
     gridBox.onChange = [this] { editor.gridBeats = std::pow(0.5,gridBox.getSelectedId()-1); timeline.repaint(); };
     bpmLabel.setText("BPM",juce::dontSendNotification);
-    tempo.setRange(30,300,1); tempo.setValue(120); tempo.setTextBoxStyle(juce::Slider::TextBoxRight,false,45,22);
+    tempo.setRange(30,300,1); tempo.setValue(120,juce::dontSendNotification); tempo.setTextBoxStyle(juce::Slider::TextBoxRight,false,45,22);
     tempo.onValueChange = [this] { if(audio.midiRecorder->isActive()){juce::String error;audio.midiRecorder->stop(error);}audio.engine.setTempo(tempo.getValue()); dirty = true; timeline.repaint(); ruler.repaint(); };
-    signature.addItemList({"4/4","3/4","6/8","7/8","5/4"},1); signature.setSelectedId(1);
+    signature.addItemList({"4/4","3/4","6/8","7/8","5/4"},1); signature.setSelectedId(1,juce::dontSendNotification);
     signature.onChange = [this] {
         const auto parts = juce::StringArray::fromTokens(signature.getText(),"/","");
         if (parts.size() == 2) { audio.engine.setTimeSignature(parts[0].getIntValue(),parts[1].getIntValue()); dirty = true; timeline.repaint(); ruler.repaint(); }
@@ -97,14 +99,14 @@ MainComponent::MainComponent()
     verticalZoom.setRange(0.65,2,0.05); verticalZoom.setValue(1); verticalZoom.setTextValueSuffix(" x");
     verticalZoom.setTextBoxStyle(juce::Slider::TextBoxRight,false,50,20);
     verticalZoom.onValueChange = [this] { preferences.verticalZoom = verticalZoom.getValue(); timeline.verticalScale = trackPanel.verticalScale = verticalZoom.getValue(); refreshEdited(); };
-    preferencesFile = juce::File(NOVA_PROJECT_ROOT).getChildFile(".nova-preferences.json"); preferences.load(preferencesFile);
+    preferencesFile = AppPaths::data().getChildFile(".nova-preferences.json"); preferences.load(preferencesFile);
     zoom.setValue(preferences.horizontalZoom,juce::dontSendNotification); timeline.setZoom(preferences.horizontalZoom);
     verticalZoom.setValue(preferences.verticalZoom,juce::dontSendNotification); timeline.verticalScale = trackPanel.verticalScale = preferences.verticalZoom;
     editor.snap = preferences.snap; snapButton.setToggleState(editor.snap,juce::dontSendNotification);
     clock.setFont(juce::Font(juce::FontOptions(20).withStyle("Bold")));
     refreshTracks(); switchView(preferences.mix); setSize(1280, 800); startTimerHz(30);
-#if defined(NOVA_TEST_SYNTH_PATH)
-    mixer.scanPlugins(juce::FileSearchPath(juce::File(NOVA_TEST_SYNTH_PATH).getParentDirectory().getFullPathName()));
+#if ! defined(NOVA_PUBLIC_TEST)
+    mixer.scanPlugins(juce::FileSearchPath(AppPaths::testSynth().getParentDirectory().getFullPathName()));
 #endif
 }
 MainComponent::~MainComponent() {
@@ -116,7 +118,7 @@ void MainComponent::paint(juce::Graphics& g) {
     g.setColour(accent); g.setFont(juce::Font(juce::FontOptions(22).withStyle("Bold")));
     g.drawText("NOVA", 16, 35, 100, 28, juce::Justification::centredLeft);
     g.setColour(juce::Colour(0xff94a3b8)); g.setFont(11.0f);
-    g.drawText("AUDIO WORKSTATION  /  FASE 7", 17, 64, 225, 20, juce::Justification::centredLeft);
+    g.drawText("ALPHA 0.7 / PUBLIC TEST", 17, 64, 225, 20, juce::Justification::centredLeft);
     meter(g, juce::Rectangle<float>(getWidth() - 220.0f, 109, 195, 5), audio.engine.masterPeak.load(), true);
 }
 void MainComponent::resized() {
@@ -260,9 +262,10 @@ void MainComponent::saveSession(bool saveAs) {
         });
 }
 void MainComponent::showError(const juce::String& text) {
+    Diagnostics::report("operation-error",text);
     juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon, "NOVA DAW", text);
 }
-juce::StringArray MainComponent::getMenuBarNames() { return {"Sessao", "Editar", "Transporte", "MIDI", "Gravacao", "Janela"}; }
+juce::StringArray MainComponent::getMenuBarNames() { return {"Sessao", "Editar", "Transporte", "MIDI", "Gravacao", "Janela", "Ajuda"}; }
 juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String&) {
     juce::PopupMenu p;
     if (index == 0) { p.addItem(1,"Nova sessao"); p.addItem(2,"Abrir... (Ctrl+O)"); p.addItem(3,"Salvar (Ctrl+S)"); p.addItem(4,"Salvar como..."); p.addSeparator(); p.addItem(5,"Importar WAV... (Ctrl+I)"); }
@@ -276,13 +279,15 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String&) {
     if(index==3){p.addItem(40,"Nova faixa MIDI");p.addItem(41,"Piano Roll");p.addItem(42,"Metronomo",true,audio.engine.metronomeEnabled.load());p.addItem(43,"Gravar / parar MIDI");}
     if(index==4){p.addItem(50,"Nova faixa de audio");p.addItem(51,"Entradas, Record, Punch e Takes");}
     if (index == 5) { p.addItem(8,"Edit",true,!mixVisible); p.addItem(9,"Mix",true,mixVisible); p.addItem(10,"Dispositivo de audio..."); }
+    if(index==6){p.addItem(70,"Abrir logs e relatorios");p.addItem(71,"Gerar relatorio de diagnostico");p.addItem(72,"Sobre Alpha 0.7");}
     return p;
 }
 void MainComponent::menuItemSelected(int id, int) {
+    if(id==70){Diagnostics::directory().startAsProcess();return;}if(id==71){const auto report=Diagnostics::report("manual",audio.deviceDescription()+" | engine: "+audio.engine.processingError()+" | gated="+juce::String(audio.engine.gatedCallbacks.load())+" | maintenance="+juce::String(audio.engine.maintenanceSilences.load()));if(report!=juce::File{})report.getParentDirectory().startAsProcess();return;}if(id==72){juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,AppPaths::releaseName,"Candidato para revisao local. Licenca de distribuicao pendente.\nLogs locais em Ajuda; nenhum envio automatico.\nRender stereo; veja README-TESTADORES e limitacoes da Fase 7.");return;}
     if(id==60){openAdvancedEditor();return;}if(id==61){applyEdit([this]{return editor.duplicate();});return;}if(id==62){editor.selectAll();refreshEdited();return;}if(id==63){editor.ripple=!editor.ripple;return;}
     if(id==50){addAudioTrack();return;}if(id==51){openRecordingEditor();return;}
     if(id==40){addMidiTrack();return;}if(id==41){openMidiEditor();return;}if(id==42){audio.engine.metronomeEnabled=!audio.engine.metronomeEnabled.load();dirty=true;return;}
-    if(id==43){juce::String error;const bool ok=audio.midiRecorder->isActive()?audio.midiRecorder->stop(error):audio.midiRecorder->start((currentSession==juce::File{}?juce::File(NOVA_PROJECT_ROOT):currentSession.getParentDirectory()).getChildFile("Recordings/MIDI"),error);if(!ok)showError(error);dirty=true;refreshEdited();return;}
+    if(id==43){juce::String error;const bool ok=audio.midiRecorder->isActive()?audio.midiRecorder->stop(error):audio.midiRecorder->start((currentSession==juce::File{}?AppPaths::workspace():currentSession.getParentDirectory()).getChildFile("Recordings/MIDI"),error);if(!ok)showError(error);dirty=true;refreshEdited();return;}
     if (id >=20 && id<=27) { editCommand(id); return; }
     if (id == 1) confirmReplacement([this] { advancedWindow.reset();closeRecording();closeMidiEditing();mixer.closeEditors(); audio.editStructure([this] { audio.engine.clear(); }); editor.reset(); currentSession = {}; dirty = false;lastAutomationRevision=audio.engine.automation->revision(); refreshTracks(); });
     if (id == 2) chooseOpen(); if (id == 3) saveSession(false); if (id == 4) saveSession(true); if (id == 5) chooseImport();
@@ -307,7 +312,7 @@ bool MainComponent::keyPressed(const juce::KeyPress& key) {
     }
     return false;
 }
-void MainComponent::openAdvancedEditor(){if(!editor.selected()){showError("Selecione um clip de audio na timeline.");return;}advancedWindow=createAdvancedAudioEditor(audio,editor,[this](auto operation){return applyEdit(std::move(operation));},currentSession==juce::File{}?juce::File(NOVA_PROJECT_ROOT):currentSession.getParentDirectory(),[this]{dirty=true;refreshEdited();});}
+void MainComponent::openAdvancedEditor(){if(!editor.selected()){showError("Selecione um clip de audio na timeline.");return;}advancedWindow=createAdvancedAudioEditor(audio,editor,[this](auto operation){return applyEdit(std::move(operation));},currentSession==juce::File{}?AppPaths::workspace():currentSession.getParentDirectory(),[this]{dirty=true;refreshEdited();});}
 void MainComponent::enableAdvancedUiValidation(const juce::File& folder){validationDirectory=folder;validationStep=0;validationAdvanced=true;}
 void MainComponent::enableMasteringUiValidation(const juce::File& folder){validationDirectory=folder;validationStep=0;validationMastering=true;audio.engine.measureDeviceCallbacks=true;}
 void MainComponent::masteringUiValidation(){
@@ -328,7 +333,7 @@ void MainComponent::advancedUiValidation(){
 void MainComponent::closeRecording(){recordingWindow.reset();juce::String error;if(!audio.audioRecorder->stop(error)&&error.isNotEmpty())juce::Logger::writeToLog(error);}
 void MainComponent::addAudioTrack(){closeRecording();juce::String error;bool ok=false;audio.editStructure([&]{ok=audio.engine.addAudioTrack("Audio "+juce::String(audio.engine.trackCount()+1),error);});if(!ok){showError(error);return;}dirty=true;editor.select(audio.engine.trackCount()-1,0);refreshTracks();openRecordingEditor();}
 void MainComponent::openRecordingEditor(){int index=editor.selectedTrack;if(index<0||index>=audio.engine.trackCount()||audio.engine.track(index).midiTrack||audio.engine.track(index).auxiliary){index=-1;for(int i=0;i<audio.engine.trackCount();++i)if(!audio.engine.track(i).midiTrack&&!audio.engine.track(i).auxiliary){index=i;break;}}
-    if(index<0){showError("Crie uma faixa de audio primeiro.");return;}recordingWindow=createRecordingEditor(audio,index,(currentSession==juce::File{}?juce::File(NOVA_PROJECT_ROOT):currentSession.getParentDirectory()).getChildFile("Recordings/Audio"),[this]{dirty=true;refreshTracks();});}
+    if(index<0){showError("Crie uma faixa de audio primeiro.");return;}recordingWindow=createRecordingEditor(audio,index,(currentSession==juce::File{}?AppPaths::workspace():currentSession.getParentDirectory()).getChildFile("Recordings/Audio"),[this]{dirty=true;refreshTracks();});}
 void MainComponent::enableRecordingUiValidation(const juce::File& dir){validationDirectory=dir;validationStep=0;validationRecording=true;}
 void MainComponent::recordingUiValidation(){
     if(++callbackTicks<12)return;callbackTicks=0;validationDirectory.createDirectory();juce::String error;bool passed=false;
@@ -348,7 +353,7 @@ void MainComponent::closeMidiEditing(){midiWindow.reset();juce::String error;aud
 void MainComponent::addMidiTrack(){juce::String error;bool ok=false;audio.editStructure([&]{ok=audio.engine.addMidiTrack("MIDI "+juce::String(audio.engine.trackCount()+1),error);});
     if(!ok){showError(error);return;}dirty=true;editor.reset();editor.select(audio.engine.trackCount()-1,audio.engine.track(audio.engine.trackCount()-1).midiClips.front().id);refreshTracks();openMidiEditor();}
 void MainComponent::openMidiEditor(){int index=editor.selectedTrack;if(index<0||index>=audio.engine.trackCount()||!audio.engine.track(index).midiTrack){index=-1;for(int i=0;i<audio.engine.trackCount();++i)if(audio.engine.track(i).midiTrack){index=i;break;}}
-    if(index<0){showError("Crie uma faixa MIDI primeiro.");return;}midiWindow=createMidiEditor(audio,index,mixer.pluginCatalog(),[this]{dirty=true;refreshEdited();},(currentSession==juce::File{}?juce::File(NOVA_PROJECT_ROOT):currentSession.getParentDirectory()).getChildFile("Recordings/MIDI"),editor.selectedRegion);}
+    if(index<0){showError("Crie uma faixa MIDI primeiro.");return;}midiWindow=createMidiEditor(audio,index,mixer.pluginCatalog(),[this]{dirty=true;refreshEdited();},(currentSession==juce::File{}?AppPaths::workspace():currentSession.getParentDirectory()).getChildFile("Recordings/MIDI"),editor.selectedRegion);}
 void MainComponent::enableUiValidation(const juce::File& dir) { audio.engine.measureDeviceCallbacks=true;validationDirectory = dir; validationStep = 0; }
 void MainComponent::enableMidiUiValidation(const juce::File& dir){audio.engine.measureDeviceCallbacks=true;validationDirectory=dir;validationStep=0;validationMidi=true;}
 void MainComponent::midiUiValidation(){
@@ -357,10 +362,8 @@ void MainComponent::midiUiValidation(){
         advancedWindow.reset();closeRecording();closeMidiEditing();mixer.closeEditors();audio.editStructure([this]{audio.engine.clear();});editor.reset();
         validationDirectory.createDirectory();juce::String error;
         audio.editStructure([&]{audio.engine.addMidiTrack("MIDI UI validation",error);
-#if defined(NOVA_TEST_SYNTH_PATH)
-            juce::VST3PluginFormat format;juce::OwnedArray<juce::PluginDescription> descriptions;format.findAllTypesForFile(descriptions,NOVA_TEST_SYNTH_PATH);
+            juce::VST3PluginFormat format;juce::OwnedArray<juce::PluginDescription> descriptions;format.findAllTypesForFile(descriptions,AppPaths::testSynth().getFullPathName());
             if(!descriptions.isEmpty()){mixer.pluginCatalog().known.addType(*descriptions[0]);audio.engine.track(0).instrument=MixProcessor::loadPlugin(*descriptions[0],audio.engine.sampleRate(),error);}
-#endif
         });editor.select(0,audio.engine.track(0).midiClips.front().id);refreshTracks();openMidiEditor();validationMidiBindings=midiWindow&&validateMidiEditorBindings(*midiWindow);
         if(midiWindow)if(auto stream=validationDirectory.getChildFile("piano-roll.png").createOutputStream()){stream->setPosition(0);stream->truncate();juce::PNGImageFormat().writeImageToStream(midiWindow->createComponentSnapshot(midiWindow->getLocalBounds()),*stream);}
         audio.engine.seek(0);audio.engine.play();
@@ -421,6 +424,7 @@ bool MainComponent::validateEditor() {
 }
 void MainComponent::timerCallback() {
     audio.serviceMaintenance();
+    const auto engineError=audio.engine.processingError();if(engineError.isNotEmpty()&&engineError!=lastDiagnosticError){lastDiagnosticError=engineError;Diagnostics::report("audio-engine",engineError);}if(++diagnosticTicks%150==0)juce::Logger::writeToLog("audio-status | "+audio.deviceDescription()+" | gated="+juce::String(audio.engine.gatedCallbacks.load())+" | maintenance="+juce::String(audio.engine.maintenanceSilences.load())+" | VST contention="+juce::String(audio.engine.contentionDropouts()));
     if(validationMastering){masteringUiValidation();return;}
     if(audio.engine.automation->revision()!=lastAutomationRevision){lastAutomationRevision=audio.engine.automation->revision();dirty=true;}
     if(validationAdvanced){advancedUiValidation();return;}

@@ -75,6 +75,7 @@ private:
     juce::File currentSession;
     bool mixVisible = false, dirty = false;
     uint64_t lastAutomationRevision=0;
+    int diagnosticTicks=0;juce::String lastDiagnosticError;
     void timerCallback() override;
     void switchView(bool);
     void chooseImport();

@@ -1,3 +1,4 @@
+#include "App/AppPaths.h"
 #include "EditorComponents.h"
 #include <cmath>
 #include "Audio/RegionAudio.h"
@@ -179,7 +180,7 @@ void Ruler::paint(juce::Graphics& g){
     g.setColour(accent);g.drawVerticalLine(static_cast<int>(engine.position()*px)-scrollX,0,static_cast<float>(getHeight()));
 }
 void Ruler::mouseDown(const juce::MouseEvent& e){engine.seek(editor.quantize((e.x+scrollX)/timeline.pixelsPerSecond));}
-Mixer::Mixer(AudioEngine& e,EditModel& ed,ApplyEdit a):engine(e),editor(ed),apply(a),catalog(juce::File(NOVA_PROJECT_ROOT).getChildFile(".nova-plugin-list.xml")){
+Mixer::Mixer(AudioEngine& e,EditModel& ed,ApplyEdit a):engine(e),editor(ed),apply(a),catalog(AppPaths::data().getChildFile(".nova-plugin-list.xml")){
     for(auto* c:std::initializer_list<juce::Component*>{&addAux,&addMono,&scan,&scanFolder,&plugins,&scanStatus})addAndMakeVisible(c);
     addAux.onClick=[this]{if(onAddAux)onAddAux(false);};addMono.onClick=[this]{if(onAddAux)onAddAux(true);};
     scan.onClick=[this]{catalog.scanConfigured();};

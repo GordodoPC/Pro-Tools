@@ -110,3 +110,10 @@ Sessão v7 lê v1–6 e conserva os recursos desta fase. Regressão final CTest
 15/15 Debug (46,40s) e Release (20,59s), 593 checks+dois smoke por build.
 Artefatos UI: `build/phase7-delivery-ui-*-{debug,release}`. Novas funções e
 limites em [phase7-report.md](phase7-report.md).
+
+## Alpha 0.7 — continuidade de distribuicao
+
+UI de gravacao instalada escreve WAVs de entradas simuladas; fontes preservadas e captura fisica pendente.
+Dados sem sessao salva usam Workspace em LocalAppData; fontes antigas nao sao
+migradas/apagadas. CTest16/16 nas duas builds,622checks+2smoke. Pacote somente
+para revisao local, conforme [alpha07-release-report.md](alpha07-release-report.md).

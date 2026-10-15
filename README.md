@@ -1,4 +1,9 @@
-# NOVA DAW — Fase 7 (0.7.0)
+# NOVA DAW Alpha 0.7 — Public Test
+
+Candidato para **revisão local**, sem autorização de publicação. Licença pública
+em decisão pelo autor; estabilização de áudio da Fase7 ainda parcial.
+Instalador/logs/testes e critérios de liberação:
+[docs/alpha07-release-report.md](docs/alpha07-release-report.md).
 
 Aplicativo desktop próprio para Windows em C++20/JUCE. Esta versão implementa
 Edit/Mix, importação WAV mono/estéreo, waveform real, reprodução simultânea,
@@ -57,7 +62,7 @@ No PowerShell, dentro desta pasta:
 Executáveis: `build/ninja-debug/NovaDAW_artefacts/Debug/NOVA DAW.exe`,
 `build/ninja-release/NovaDAW_artefacts/Release/NOVA DAW.exe` e
 `build/msvc/NovaDAW_artefacts/Debug/NOVA DAW.exe` (build histórico Fase 2).
-São builds locais; ainda não existe instalador de distribuição.
+São builds locais. O instalador Alpha é gerado pelos scripts abaixo, sem publicação.
 
 ## Uso
 
@@ -150,7 +155,8 @@ transições suaves. Alterações estruturais podem interromper brevemente o áu
 Em janelas pequenas, use a rolagem da mesa para acessar todos os controles.
 
 Larguras, zoom, vista Edit/Mix e Snap são restaurados por
-`.nova-preferences.json`, local à pasta deste projeto.
+`.nova-preferences.json`, em `%LOCALAPPDATA%\NOVA DAW\Alpha 0.7`.
+Lista de plugins também usa essa pasta; dados antigos do workspace são preservados.
 
 Sessões versão 7 guardam modos/curvas de automação, grupos, Solo Safe, sidechain,
 sends avançados e opções de exportação. Versões 1–6 continuam legíveis.
@@ -363,3 +369,27 @@ e exige medição finita/zero overflow, além dos critérios funcionais anterior
 Overruns continuam contados por `frames/sampleRate`, mesmo com `passed=true`
 funcional. Rode um aplicativo de validação por vez; use uma pasta nova por ensaio.
 Snapshots/JSON/WAVs de teste ficam em `build` e não são versionados.
+
+## Candidato Alpha Windows x64
+
+Após compilar Release e executar os testes, gere uma pasta NOVA (o script recusa
+substituir pacote de revisão existente):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-alpha.ps1 -OutputDirectory build/releases/alpha-0.7-review
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-alpha-install.ps1 -PackageDirectory build/releases/alpha-0.7-review -ReportDirectory "$PWD\build\alpha07-install-review"
+```
+
+A política PowerShell fica limitada a esses processos. O empacotador usa somente
+MSVC/Windows SDK/CMake já presentes, MSI/CAB e runtime Redist local com assinatura
+Microsoft verificada. Gera Setup.exe, MSI, desinstalador, ZIP portátil, fontes com
+JUCE/patches, avisos/inventário e SHA256SUMS. Não instala ferramentas ou faz upload.
+O teste instala/remove a própria Alpha por usuário; recusa instalação preexistente
+e deixa um arquivo sentinela para comprovar preservação de fontes desconhecidas.
+
+Instalação: `%LOCALAPPDATA%\Programs\NOVA DAW Alpha 0.7`. Dados e logs:
+`%LOCALAPPDATA%\NOVA DAW\Alpha 0.7`. Ajuda abre logs/gera relatório local;
+nenhuma telemetria automática. Para testes isolados, `--data-dir "pasta absoluta"`.
+Leia [packaging/README-TESTADORES.md](packaging/README-TESTADORES.md).
+RELEASE-STATUS.json mantém publicação bloqueada até licença, revisão, estabilidade
+e ensaio em outro computador. O pacote não é declarado pronto pelo simples build.

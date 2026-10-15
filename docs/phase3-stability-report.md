@@ -373,3 +373,11 @@ Private92938240→112209920, após clear88608768; C++ nas amostras0/300
 Artefato `build/phase7-delivery-stability-300s/stability-result.json`; não é
 hardware nem a carga histórica da comparação4→2. Estado final de medidor reinicia
 nas trocas de rate/sessão; não se declara contador acumulado de drops entre resets.
+
+Alpha0.7 adiciona logger MPSC limitado, escrita/rotação no controle e relato fatal
+fora do contrato normal de render. DiagnosticsAndPaths29checks passou nas duas
+builds, incluindo zero C++ new observado no produtor e retenção/concorrência.
+CTest16/16 Debug/Release,622checks+2smoke; instalação/scanner/áudio de instrumento
+próprio e exportação passaram no computador original. Nenhum novo ensaio300s de
+áudio Alpha com logging foi inferido desses testes curtos: prazos continuam
+parciais e bloqueiam aceite público. [Relatório](alpha07-release-report.md).

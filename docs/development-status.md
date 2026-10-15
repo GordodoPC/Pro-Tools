@@ -1,5 +1,11 @@
 # Estado do desenvolvimento — 2026-10-15, versão 0.7.0
 
+Alpha0.7 Public Test: candidato **local**, licença em decisão e publicação bloqueada.
+Instalador EXE/MSI, desinstalador, atalhos/runtime e diagnósticos implementados;
+CTest16/16 Debug/Release,622checks+2smoke, dez UIs e26checks de instalação aprovados.
+Estado atual de entrega: [alpha07-release-report.md](alpha07-release-report.md).
+Fase7 permanece parcial quanto a prazos; empacotamento não encerra essa pendência.
+
 Entrega atual: automação Write/Touch/Latch/Read e curvas/Undo, VCA/grupos,
 sidechain nativo com PDC, Solo Safe/sends avançados e masterização/exportação
 integradas ao MIX. Builds Debug/Release e CTest **15/15** nas duas configurações,
@@ -28,7 +34,7 @@ Hardware de captura/MIDI físico, terceiros e audição prolongada seguem penden
 
 O registro abaixo preserva a auditoria e resultados históricos da retomada.
 Executável atual: `build/ninja-release/NovaDAW_artefacts/Release/NOVA DAW.exe`;
-SHA256 `1FD56437C10993E5428216177B54CCB1D72030ACBFF2144858C19E77C2557A05`.
+SHA256 Alpha `488815BB683BBA913768FDD6786D66CF86E9F48FB9CFF4740C1A23970FF03A32`.
 Commits locais da Fase7:9ff7c27,9d759da,a3bf187,805c5e7; base anterior preservada.
 Main remota consultada novamente ao fechar:ccf7ec34bd1577bd19a9bbd57b12e53b7861c755,
 sem alteração em relação à auditoria. Nenhum conteúdo remoto substituiu arquivos locais.

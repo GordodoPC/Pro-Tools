@@ -31,7 +31,7 @@ class EffectPanel final : public juce::Component,private juce::Timer {
 public:
     EffectPanel(MixProcessor& p,std::function<void()> c,double rate,AudioEngine* owner=nullptr,int track=-1,int slot=-1):processor(p),changed(std::move(c)),sampleRate(rate){
         for(int i=0;i<p.parameterCount();++i){auto slider=std::make_unique<juce::Slider>();const auto spec=p.spec(i);slider->setRange(spec.minimum,spec.maximum,0);
-            slider->setTextBoxStyle(juce::Slider::TextBoxRight,false,75,22);slider->setValue(p.parameter(i));
+            slider->setTextBoxStyle(juce::Slider::TextBoxRight,false,75,22);slider->setValue(p.parameter(i),juce::dontSendNotification);
             slider->onValueChange=[this,i,s=slider.get()]{processor.setParameter(i,static_cast<float>(s->getValue()));changed();repaint();};
             if(owner&&track>=0){slider->onDragStart=[owner,track,slot,i]{juce::String error;owner->automation->begin(track,slot,i,error);};slider->onDragEnd=[owner,track,slot,i]{owner->automation->end(track,slot,i);};}
             auto label=std::make_unique<juce::Label>();label->setText(spec.name,juce::dontSendNotification);addAndMakeVisible(*label);addAndMakeVisible(*slider);labels.push_back(std::move(label));sliders.push_back(std::move(slider));}
@@ -65,9 +65,9 @@ public:
         auto route=[this]{juce::String error;const int target=destination.getSelectedId()-2;const bool isPre=pre.getToggleState();
             if(!apply([&,target,isPre]{return engine.setSend(index,sendSlot,target,isPre,error);})){juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Roteamento",error);destination.setSelectedId(engine.track(index).sends[sendSlot].target+2,juce::dontSendNotification);pre.setToggleState(engine.track(index).sends[sendSlot].preFader,juce::dontSendNotification);}};
         destination.onChange=route;pre.onClick=route;label.setText("Nivel do send (dB)",juce::dontSendNotification);
-        level.setRange(-60,6,0.1);level.setValue(juce::Decibels::gainToDecibels(send.gain.load(),-60.0f));level.setTextBoxStyle(juce::Slider::TextBoxRight,false,75,22);
+        level.setRange(-60,6,0.1);level.setValue(juce::Decibels::gainToDecibels(send.gain.load(),-60.0f),juce::dontSendNotification);level.setTextBoxStyle(juce::Slider::TextBoxRight,false,75,22);
         level.onValueChange=[this]{engine.track(index).sends[sendSlot].gain=level.getValue()<=-60?0:juce::Decibels::decibelsToGain(float(level.getValue()));changed();};
-        addAndMakeVisible(pan);addAndMakeVisible(width);addAndMakeVisible(mute);pan.setRange(-1,1,0.01);pan.setTextValueSuffix(" pan");width.setRange(0,2,0.01);width.setTextValueSuffix(" width");pan.setValue(send.pan);width.setValue(send.width);mute.setClickingTogglesState(true);mute.setToggleState(send.mute,juce::dontSendNotification);
+        addAndMakeVisible(pan);addAndMakeVisible(width);addAndMakeVisible(mute);pan.setRange(-1,1,0.01);pan.setTextValueSuffix(" pan");width.setRange(0,2,0.01);width.setTextValueSuffix(" width");pan.setValue(send.pan,juce::dontSendNotification);width.setValue(send.width,juce::dontSendNotification);mute.setClickingTogglesState(true);mute.setToggleState(send.mute,juce::dontSendNotification);
         pan.onValueChange=[this]{engine.track(index).sends[sendSlot].pan=float(pan.getValue());changed();};width.onValueChange=[this]{engine.track(index).sends[sendSlot].width=float(width.getValue());changed();};mute.onClick=[this]{engine.track(index).sends[sendSlot].mute=mute.getToggleState();changed();};setSize(440,290);
     }
     void resized()override{destination.setBounds(15,15,getWidth()-30,30);pre.setBounds(15,55,160,28);label.setBounds(15,95,getWidth()-30,22);level.setBounds(15,120,getWidth()-30,30);pan.setBounds(15,160,getWidth()-30,30);width.setBounds(15,200,getWidth()-30,30);mute.setBounds(15,245,120,25);}
@@ -79,9 +79,9 @@ class GroupPanel final : public juce::Component {
 public:
     GroupPanel(AudioEngine& e,int track,MixEdit a,std::function<void()> c):engine(e),index(track),apply(std::move(a)),changed(std::move(c)){
         for(auto* child:std::initializer_list<juce::Component*>{&vca,&group,&sidechain,&kind,&number,&name,&gain,&mute,&solo,&safe,&info})addAndMakeVisible(child);
-        vca.addItem("Sem VCA",1);group.addItem("Sem grupo",1);for(int i=0;i<8;++i){vca.addItem("VCA "+juce::String(i+1),i+2);group.addItem("Grupo "+juce::String(i+1),i+2);number.addItem(juce::String(i+1),i+1);}vca.setSelectedId(e.track(index).vcaGroup+2);group.setSelectedId(e.track(index).channelGroup+2);
+        vca.addItem("Sem VCA",1);group.addItem("Sem grupo",1);for(int i=0;i<8;++i){vca.addItem("VCA "+juce::String(i+1),i+2);group.addItem("Grupo "+juce::String(i+1),i+2);number.addItem(juce::String(i+1),i+1);}vca.setSelectedId(e.track(index).vcaGroup+2,juce::dontSendNotification);group.setSelectedId(e.track(index).channelGroup+2,juce::dontSendNotification);
         vca.onChange=[this]{apply([&]{engine.track(index).vcaGroup=vca.getSelectedId()-2;return true;});};group.onChange=[this]{apply([&]{engine.track(index).channelGroup=group.getSelectedId()-2;return true;});};
-        sidechain.addItem("Sidechain: desligado",1);for(int i=0;i<e.trackCount();++i)if(i!=index)sidechain.addItem("Key: "+e.track(i).name,i+2);sidechain.setSelectedId(e.track(index).sidechainSource+2);
+        sidechain.addItem("Sidechain: desligado",1);for(int i=0;i<e.trackCount();++i)if(i!=index)sidechain.addItem("Key: "+e.track(i).name,i+2);sidechain.setSelectedId(e.track(index).sidechainSource+2,juce::dontSendNotification);
         sidechain.onChange=[this]{juce::String error;if(!apply([&]{return engine.setSidechain(index,sidechain.getSelectedId()-2,error);})){sidechain.setSelectedId(engine.track(index).sidechainSource+2,juce::dontSendNotification);info.setText(error,juce::dontSendNotification);}};
         kind.addItem("VCA",1);kind.addItem("Grupo de canais",2);kind.setSelectedId(1);number.setSelectedId(1);kind.onChange=[this]{refresh();};number.onChange=[this]{refresh();};
         gain.setRange(-60,12,0.1);gain.setTextValueSuffix(" dB grupo");gain.onValueChange=[this]{selected().gain=gain.getValue()<=-60?0:juce::Decibels::decibelsToGain(float(gain.getValue()));changed();};

@@ -200,3 +200,27 @@
 - Release:build/ninja-release/NovaDAW_artefacts/Release/NOVA DAW.exe;
   SHA2561FD56437C10993E5428216177B54CCB1D72030ACBFF2144858C19E77C2557A05.
   Resultados/cargas/limitações/roteiro manual no phase7-report.md.
+
+## 2026-10-15 — NOVA DAW Alpha0.7 Public Test, revisão local
+
+- Autor escolheu preparar somente para revisão local enquanto decide licença;
+  não foi adicionada licença ao código e não haverá publicação automática.
+- AppPaths elimina dependência do workspace: LocalAppData/Alpha0.7 para dados,
+  Workspace para fontes sem sessão salva, instrumento próprio relativo ao exe.
+- Identificação Alpha no app; RC0.3.0 obsoleto corrigido com dependência na Info.txt.
+  BPM/compasso e painéis nativos usam inicialização silenciosa; sem edição ao abrir.
+- Logger MPSC256x768/8tentativas, overflow/rotação limitada no controle, relatório
+  de operações/engine e exceção Windows real mínima. Nenhum envio automático.
+- Build Debug/Release aprovados; CTest16/16:35,57s/17,29s,622checks+2smoke por
+  configuração. Dez UIs passaram, Edit/Mix corrigido reexecutado nas duas builds.
+- EXE/MSI/CAB e desinstalador nativos, atalhos por usuário, dez DLLs MSVC locais
+  com assinatura verificada. Sem instalar WiX/Inno/NSIS/dependências, drivers,
+  serviços ou plugins globais. Avisos/SBOM/fontes de revisão incluídos.
+- Instalador validado em26checks: contextoMSI2(não4), hashes/atalhos/runtime local,
+  início/fechamento, scanner/instrumento, quatro fluxos UI, crash/relançamento,
+  recusa de remoção em uso, reparo e desinstalação completa preservando fontes/logs.
+  Artefato:build/alpha07-install-validation6b/installation-result.json.
+- Falhas de autoria MSI corrigidas antes do aceite. Teste agora espera msiexec
+  completar, além de o registro desaparecer; sentinela é mantida sem limpeza recursiva.
+- Release Alpha SHA256488815BB683BBA913768FDD6786D66CF86E9F48FB9CFF4740C1A23970FF03A32.
+  Publicação continua bloqueada: licença/revisão, dez overruns históricos e outro PC.

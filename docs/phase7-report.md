@@ -416,3 +416,13 @@ de prazo resolvida. Os quatro ensaios instrumentados são mantidos em suas pasta
 a comparação histórica4→2 e a integrada32→10 têm cargas diferentes entre si.
 Próximos passos de estabilização: trace CPU/DPC/ISR, horas com dispositivo real,
 contagem de drops preservada através de resets e probes de alocadores externos.
+
+## Continuidade Alpha0.7
+
+Preparado candidato de instalação/logs/documentação para revisão local, conforme
+[alpha07-release-report.md](alpha07-release-report.md). Publicação bloqueada por
+decisão de licença, revisão do instalador, estabilidade e máquina limpa. CTest
+16/16 e26checks de instalação passaram neste computador, preservando as suítes
+anteriores. Corrigidas inicializações assíncronas de controles que marcavam
+sessão vazia/abertura de painel como edição. Isso não converte os dez overruns
+históricos em cumprimento de prazo nem conclui as pendências de hardware.
