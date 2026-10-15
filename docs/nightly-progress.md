@@ -99,8 +99,18 @@
   edição avançada × Debug/Release. Evidências em
   `build/resume-20261015-ui-{editmix,midi,recording,advanced}-{debug,release}`.
   Saída Realtek 48000 Hz/480 samples; captura simulada, MIDI físico não testado.
-- Ensaio Release de 300 s iniciado separadamente depois de builds/CTest/UI;
-  resultado será registrado ao terminar. Hardware, terceiros, qualidade
-  perceptual e ensaios de horas continuam pendentes. Fase 7 sem escopo funcional
-  definido no roadmap atual; preparação e contratos registrados na auditoria.
+- Ensaio Release final, separado de builds/CTest/UI: **300,081 s**, 35380 callbacks,
+  13819428 samples, CPU 21,04% de um núcleo, max render 19,082 ms, **9 violações
+  de prazo**, zero new observado/erros de controle/silêncios por contenção VST,
+  14 recalculos de latência, samples finitos. `passed=true`; memória privada
+  inicial/final/pico 89309184 / 109375488 / 109404160 bytes. Artefato:
+  `build/stability-resume-20261015-release-300s/stability-result.json`.
+- Prazos/memória, hardware, terceiros, qualidade perceptual e ensaios de horas
+  continuam pendentes. Fase 7 sem escopo funcional definido no roadmap atual;
+  preparação e contratos registrados na auditoria. Diretórios padrão VST3
+  continuam ausentes. Não foi declarada certificação hard real-time.
 - Nenhum push/reset/rebase, instalação de dependências/plugins ou alteração global.
+- Correções e regressões no commit local **a8df20d**. Executável Release:
+  `build/ninja-release/NovaDAW_artefacts/Release/NOVA DAW.exe`;
+  SHA256 `0976427221EC4B7572578C00D96789C77B4F64EE91DBD5A36BF35827F76DC21F`.
+  Snapshot Release do editor avançado inspecionado visualmente.

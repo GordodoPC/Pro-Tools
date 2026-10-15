@@ -124,3 +124,9 @@ VST3i real, captura e persistência. Total do projeto: 513 verificações e dois
 smoke tests por configuração, após regressões de recuperação/bounce.
 Entrada MIDI física, jitter/hotplug e instrumentos externos seguem pendentes.
 Auditoria e preparação das próximas etapas: [development-status.md](development-status.md).
+
+UI MIDI Debug/Release reexecutada com `passed=true`, Piano Roll/Undo/Redo,
+áudio real do NOVA Test Synth no callback Realtek e roundtrip aprovados;
+tempo final 90 BPM. Artefatos:
+`build/resume-20261015-ui-midi-{debug,release}/ui-result.json` e `piano-roll.png`.
+`physicalMidiInputTested=false`, `thirdPartyInstrumentTested=false`.

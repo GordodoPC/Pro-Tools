@@ -64,3 +64,33 @@ como implementados nem substituir o roadmap autorizado.
 Antes de ampliar a arquitetura: manter regressões 4–6 aprovadas, revisar os
 ensaios de estabilidade, e executar/registrar os roteiros físicos disponíveis.
 Medições pendentes e limites conhecidos permanecem nos relatórios de cada fase.
+
+## Validação do ciclo
+
+Correções e regressões no commit local **a8df20d**. Builds Ninja x64 Debug e
+Release aprovados. CTest final: **12/12 Debug (36,78 s)** e **12/12 Release
+(20,43 s)**, **513 verificações + dois smoke tests** em cada configuração.
+Gravação: 43 verificações; edição avançada: 60; demais fases: 410.
+
+Oito execuções da interface passaram, uma por vez: Edit/Mix, MIDI, gravação e
+edição avançada nas duas configurações. JSONs e snapshots em
+`build/resume-20261015-ui-{editmix,midi,recording,advanced}-{debug,release}/`.
+Edit/Mix e instrumento próprio produziram callback de saída Realtek não nulo,
+48000 Hz/480 samples. Captura usa entradas simuladas; MIDI físico/terceiros
+não foram exercitados. Salvar/reabrir e bindings passaram em todos os modos.
+
+Executável Release validado:
+`build/ninja-release/NovaDAW_artefacts/Release/NOVA DAW.exe`.
+SHA256: `0976427221EC4B7572578C00D96789C77B4F64EE91DBD5A36BF35827F76DC21F`.
+Debug: `build/ninja-debug/NovaDAW_artefacts/Debug/NOVA DAW.exe`.
+CTest: `build/{ninja-debug,ninja-release}/Testing/Temporary/LastTest.log`.
+
+Ensaio prolongado Release aprovado funcionalmente: 300,081 s, 35380 callbacks,
+13819428 samples, CPU 21,04% de um núcleo, max render 19,082 ms, **9 violações
+de prazo**, zero new observado/erros de controle, 14 recalculos de latência.
+Memória privada inicial/final/pico amostrado: 89309184 / 109375488 / 109404160
+bytes. Crescimento e prazos continuam pendências de estabilização; nenhuma
+certificação hard real-time ou ausência de leaks é declarada.
+Artefato: `build/stability-resume-20261015-release-300s/stability-result.json`.
+Detalhes e interpretação em [phase3-stability-report.md](phase3-stability-report.md).
+O snapshot Release do editor avançado também foi inspecionado visualmente.

@@ -297,3 +297,43 @@ Inclui regressões de PDC/lifecycle/concorrência e probes existentes do callbac
 Persistem as pendências de horas com hardware, roundtrip, terceiros e ausência
 de certificação hard real-time; uma nova execução curta não elimina os limites
 históricos do teste de 300 s nem comprova ausência de vazamentos.
+
+Regressão de interface Edit/Mix e MIDI Debug/Release: callback Realtek não nulo,
+48000 Hz/480 samples; Play/Pause/Stop/loop, DSP/sends/Read/Master, Piano Roll e
+sessões aprovados. Artefatos em `build/resume-20261015-ui-*`.
+Em 2026-10-15, os três diretórios padrão VST3 da tabela histórica continuam
+ausentes (`Test-Path=false`); nenhum plugin de terceiros foi instalado ou validado.
+
+### Novo ensaio prolongado Release — 2026-10-15
+
+Código validado no commit `a8df20d`; executado depois dos builds, CTest e oito
+processos de UI, sem outras compilações/testes concorrentes deste ciclo.
+Render agendado, sem dispositivo de áudio, 32 faixas/3 buses/10 VST3 próprios,
+cinco DSPs, Read e mudanças de rate/buffer/latência/sessão/editor.
+
+| Métrica | Resultado observado |
+|---|---:|
+| Duração | 300,081 s |
+| Callbacks / samples | 35380 / 13819428 |
+| CPU equivalente a um núcleo | 21,04% |
+| Render máximo | 19,082 ms |
+| Violações de prazo | **9** |
+| Alocações C++ observadas no render | 0 |
+| Erros de controle / silêncios por contenção VST | 0 / 0 |
+| Recalculos dinâmicos de latência | 14 |
+| Memória privada inicial / final | 89309184 / 109375488 bytes |
+| Pico privado amostrado | 109404160 bytes |
+
+`passed=true`, samples finitos e 40 verificações de estabilidade aprovadas.
+As nove violações de prazo e o crescimento de memória permanecem evidência
+de limitações: não se declara certificação hard real-time nem ausência de
+vazamentos. O ensaio histórico teve sete violações; são execuções em momentos
+distintos, sem demonstração causal de melhora de desempenho. Este ciclo alterou
+recuperação/bounce fora do callback, preservando o processamento de reprodução.
+
+Resultado completo, incluindo amostras de CPU/memória por segundo:
+`build/stability-resume-20261015-release-300s/stability-result.json`.
+Reprodução: comando de 300 s do README, usando essa pasta como primeiro argumento.
+Probe Release observa C++ new, sem instrumentar todo malloc/alocador estrangeiro.
+Hardware e terceiros não foram usados neste ensaio; investigação de prazos,
+crescimento de memória e execução de horas permanecem pendentes.

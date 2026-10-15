@@ -97,3 +97,8 @@ CTest final Debug **12/12 (36,78 s)** e Release **12/12 (20,43 s)**.
 Não houve mudança de formato de sessão, dos limites ou do monitoramento opt-in.
 Captura permanece simulada nesses testes, com escrita/leitura de WAVs reais;
 gravação física multicanal e calibração de latência continuam pendentes.
+
+UI de gravação Debug/Release passou novamente: bindings, duas capturas distintas
+e roundtrip aprovados, monitoring desligado após abrir. Artefatos:
+`build/resume-20261015-ui-recording-{debug,release}/ui-result.json` e
+`recording-panel.png`. `simulatedInputs=true`, `hardwareRecordingTested=false`.

@@ -194,3 +194,11 @@ e Release **12/12 (20,43 s)**; total **513 verificações + dois smoke tests** p
 configuração. Originais continuam conferidos byte-for-byte. Nenhuma mudança de
 algoritmo stretch/pitch, formato de sessão ou callback de áudio neste ciclo.
 Qualidade perceptual, sessões longas, IO adverso real e terceiros seguem pendentes.
+
+UI avançada Debug/Release passou: bindings, transform/preview/consolidate/bounce
+assíncronos e sessão aprovados, em
+`build/resume-20261015-ui-advanced-{debug,release}/ui-result.json` e
+`audio-editor.png`. Regressão Edit/Mix também passou nas duas configurações,
+em `build/resume-20261015-ui-editmix-{debug,release}/ui-result.json`.
+Correções no commit local `a8df20d`. Novo SHA256 Release:
+`0976427221EC4B7572578C00D96789C77B4F64EE91DBD5A36BF35827F76DC21F`.
